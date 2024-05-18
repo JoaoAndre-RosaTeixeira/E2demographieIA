@@ -4,3 +4,4 @@ docs/
 models/
 train_models/
 *.pkl
+plots/
