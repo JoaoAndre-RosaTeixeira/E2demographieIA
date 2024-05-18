@@ -15,9 +15,7 @@ EXPOSE 8080
 
 # Définir la variable d'environnement pour dire à Flask d'écouter sur toutes les IPs
 ENV FLASK_RUN_HOST=0.0.0.0
-
-# Définir la variable d'environnement pour spécifier le port
 ENV PORT 8080
 
 # Commande pour lancer l'application
-CMD ["flask", "run", "--host=0.0.0.0", "--port=8080"]
+ENTRYPOINT ["flask", "run", "--host=0.0.0.0", "--port=8080"]
