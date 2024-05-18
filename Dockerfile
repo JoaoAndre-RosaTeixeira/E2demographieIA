@@ -1,25 +1,25 @@
-# Utiliser une image de base officielle de Python 3.12
-FROM python:3.12-slim
+# Étape de build
+FROM python:3.12-slim AS builder
 
-# Définir le répertoire de travail
 WORKDIR /app
 
-# Copier les fichiers de l'application dans le conteneur
 COPY . /app
 
-# Installer les dépendances
 RUN python -m venv /opt/venv
 RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-# Exposer le port sur lequel Flask va tourner
-EXPOSE 80
+# Étape finale
+FROM python:3.12-slim
 
-# Définir la variable d'environnement pour dire à Flask d'écouter sur toutes les IPs
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
+COPY . /app
+
+EXPOSE 8080 
+
 ENV FLASK_RUN_HOST=0.0.0.0
-ENV PORT 80
-
-# Assurer que les commandes utilisent l'environnement virtuel
+ENV PORT 8080  # Utilisation du port 8080
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Commande pour lancer l'application
-CMD ["flask", "run", "--host=0.0.0.0", "--port=80"]
+CMD ["flask", "run", "--host=0.0.0.0", "--port=8080"]  # Préciser le port 8080
