@@ -52,7 +52,7 @@ class PopulationParAnnee(db.Model):
 
 # Configuration des entités avec leurs attributs correspondants
 entity_config = {
-    'commune': {'model': Commune, 'code_attr': 'codes_postaux', 'population_relationship': 'populations'},
+    'commune': {'model': Commune, 'code_attr': 'code', 'population_relationship': 'populations'},
     'departement': {'model': Departement, 'code_attr': 'code', 'population_relationship': 'communes'},
     'region': {'model': Region, 'code_attr': 'code', 'population_relationship': 'departements'}
 }
