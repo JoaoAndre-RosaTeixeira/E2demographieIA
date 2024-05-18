@@ -7,8 +7,11 @@ WORKDIR /app
 # Copier les fichiers de l'application dans le conteneur
 COPY . /app
 
-# Installer les dépendances
-RUN pip install --no-cache-dir -r requirements.txt
+# Installer venv et créer un environnement virtuel
+RUN python -m venv /opt/venv
+
+# Activer l'environnement virtuel et installer les dépendances
+RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # Exposer le port sur lequel Flask va tourner
 EXPOSE 8080
@@ -17,5 +20,8 @@ EXPOSE 8080
 ENV FLASK_RUN_HOST=0.0.0.0
 ENV PORT 8080
 
+# Assurer que les commandes utilisent l'environnement virtuel
+ENV PATH="/opt/venv/bin:$PATH"
+
 # Commande pour lancer l'application
-ENTRYPOINT ["flask", "run", "--host=0.0.0.0", "--port=8080"]
+CMD ["flask", "run", "--host=0.0.0.0", "--port=8080"]
