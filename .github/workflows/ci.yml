@@ -1,0 +1,49 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.12
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pandas joblib pmdarima flask sqlalchemy psycopg2-binary
+
+    - name: Run tests
+      run: pytest tests
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    - name: Set up Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        project_id: dev-ia-e1
+        export_default_credentials: true
+
+    - name: Build and push Docker image
+      run: |
+        gcloud builds submit --tag gcr.io/dev-ia-e1/flask-app
+
+    - name: Deploy to Cloud Run
+      run: |
+        gcloud run deploy flask-app --image gcr.io/dev-ia-e1/flask-app --platform managed --region europe-west1 --allow-unauthenticated
