@@ -1,6 +1,12 @@
 import pytest
+import sys
+import os
 import pandas as pd
 from pmdarima import auto_arima
+
+# Ajouter le répertoire racine au chemin de recherche des modules
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from model import get_best_arima_model, save_model, load_model, train_and_evaluate
 
 @pytest.fixture
