@@ -1,11 +1,14 @@
 from urllib.parse import quote_plus
-from flask import Flask, jsonify, request
+import zipfile
+from flask import Flask, jsonify, request, send_file
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
-from model import train_and_predict, train_and_evaluate, save_model, load_model, get_best_arima_model
+from model import load_model_info, plot_population_forecast, generate_monitoring_plot, save_model_info, train_and_evaluate, save_model, load_model, get_best_arima_model
 import pandas as pd
 import os
+import matplotlib
+matplotlib.use('Agg')
 
 # Configuration de l'application Flask
 app = Flask(__name__)
@@ -57,7 +60,7 @@ entity_config = {
 @app.route('/<entity_type>', methods=['GET'])
 def get_data(entity_type):
     code = request.args.get('code', default=None)
-    year = request.args.get('year', default=None) 
+    year = request.args.get('year', default=None)
 
     config = entity_config.get(entity_type)
     if not config:
@@ -73,13 +76,7 @@ def get_data(entity_type):
     if not entities:
         return jsonify(message="No entities found"), 404
 
-    results = []
     for entity in entities:
-        entity_data = {
-            'nom': entity.nom,
-            'code': getattr(entity, config['code_attr']),
-            'populations': []
-        }
 
         if entity_type == 'commune':
             populations = entity.populations if year is None else [pop for pop in entity.populations if pop.annee == year]
@@ -102,11 +99,16 @@ def get_data(entity_type):
             else:
                 population_summary[pop.annee] = pop.population
 
-        entity_data['populations'] = [{'annee': k, 'population': v} for k, v in sorted(population_summary.items())]
+    response = {
+        'code': entity.code,
+        'nom': entity.nom,
+        'populations': [{'annee': k, 'population': v} for k, v in sorted(population_summary.items())]
+    }
+    
+    if entity_type == 'commune':
+        response['codes_postaux'] = entity.codes_postaux
         
-        results.append(entity_data)
-
-    return jsonify(results)
+    return jsonify(response)
 
 @app.route('/predict/<entity_type>', methods=['GET'])
 def predict(entity_type):
@@ -152,7 +154,6 @@ def predict(entity_type):
         else:
             population_summary[pop.annee] = pop.population
 
-
     series = pd.Series(data=list(population_summary.values()), index=pd.to_datetime(list(population_summary.keys()), format='%Y')).asfreq('YS')
     series = series.interpolate(method='linear').dropna()  # Supprimer les NaN par interpolation linéaire
 
@@ -173,13 +174,21 @@ def predict(entity_type):
     forecast_df = pd.DataFrame(forecast_df, index=forecast_index, columns=['mean'])
     predicted_value = forecast_df['mean'].iloc[-1]
 
+    # Sauvegarder le graphique
+    plot_filename = f"plots/{entity_type}_{code}_{target_year}.png"
+    plot_monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{target_year}.png"
+    plot_population_forecast(series, forecast_df, plot_filename)
+    generate_monitoring_plot(series, forecast_df, plot_monitoring_filename)
+
     # Construction de la réponse
     response = {
-        'code': code,
+        'code': entity.code,
         'nom': entity.nom,
         'target_year': target_year,
-        'predicted_population': int(predicted_value)
+        'predicted_population': int(predicted_value),
+        'plot_url': f"/get_plot/{entity_type}?code={code}&year={target_year}",
     }
+
 
     if entity_type == 'commune':
         response['codes_postaux'] = entity.codes_postaux
@@ -216,7 +225,6 @@ def train(entity_type):
     if not populations:
         return jsonify({'error': f'Aucune donnée de population trouvée pour ce {entity_type}.'}), 404
 
-    # Préparation des données sous forme de série temporelle
     population_summary = {}
     for pop in populations:
         if pop.annee in population_summary:
@@ -224,29 +232,33 @@ def train(entity_type):
         else:
             population_summary[pop.annee] = pop.population
 
-
     series = pd.Series(data=list(population_summary.values()), index=pd.to_datetime(list(population_summary.keys()), format='%Y')).asfreq('YS')
-    series = series.interpolate(method='linear').dropna()  # Supprimer les NaN par interpolation linéaire
+    series = series.interpolate(method='linear').dropna()
 
-    # Déterminer la dernière année dans les données pour l'évaluation
     eval_year = series.index[-1].year
 
-    # Vérifier si le modèle existe déjà
     model_filename = f"{entity_type}_{code}_{eval_year}.pkl"
-    if os.path.exists(os.path.join('train_models', model_filename)) and series.index[-1].year <= eval_year:
-        model = load_model(f"train_models/{model_filename}")
-        print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
-        return jsonify({'message': f'Modèle chargé depuis {model_filename}.'})
-    else:
-        # Entraînement et évaluation
-        accuracy, best_order, best_seasonal_order = train_and_evaluate(series, eval_year=eval_year)
+    model_info_filename = f"train_models/{entity_type}_{code}_{eval_year}_info.json"
 
-        # Sauvegarder le modèle
+    if os.path.exists(os.path.join('train_models', model_filename)) and os.path.exists(model_info_filename) and series.index[-1].year <= eval_year:
+        model = load_model(f"train_models/{model_filename}")
+        model_info = load_model_info(model_info_filename)
+        accuracy = model_info['accuracy']
+        best_order = model_info['best_order']
+        best_seasonal_order = model_info['best_seasonal_order']
+        print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
+    else:
+        accuracy, best_order, best_seasonal_order = train_and_evaluate(series, eval_year=eval_year)
         model = get_best_arima_model(series)
         save_model(model, f"train_models/{model_filename}")
-        print(f"Modèle sauvegardé sous {model_filename}.")
-
-    # Construction de la réponse
+        model_info = {
+            'accuracy': accuracy,
+            'best_order': best_order,
+            'best_seasonal_order': best_seasonal_order
+        }
+        save_model_info(model_info, model_info_filename)
+        print(f"Modèle sauvegardé sous {model_filename} avec les informations d'évaluation {model_info_filename}.")
+    
     response = {
         'code': code,
         'nom': entity.nom,
@@ -259,6 +271,61 @@ def train(entity_type):
         response['codes_postaux'] = entity.codes_postaux
 
     return jsonify(response)
+
+
+        
+@app.route('/get_plot/<entity_type>', methods=['GET'])
+def get_plot(entity_type):
+    code = request.args.get('code')
+    year = request.args.get('year')
+
+    if not code or not year:
+        return jsonify({'error': 'Veuillez fournir les paramètres "code" et "year".'}), 400
+
+    try:
+        year = int(year)
+    except ValueError:
+        return jsonify({'error': 'L\'année doit être un entier.'}), 400
+
+    config = entity_config.get(entity_type)
+    if not config:
+        return jsonify(message="Invalid entity type"), 400
+
+    model = config['model']
+    
+    entity = db.session.query(model).filter(getattr(model, config['code_attr']) == code).first()
+    if not entity:
+        return jsonify({'error': f'{entity_type.capitalize()} avec code {code} non trouvé.'}), 404
+
+    plot_filename = f"plots/{entity_type}_{code}_{year}.png"
+    monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{year}.png"
+
+    plot_url = None
+    monitoring_url = None
+
+    if os.path.exists(plot_filename):
+        plot_url = f"/get_image?filename={plot_filename}"
+
+    if os.path.exists(monitoring_filename):
+        monitoring_url = f"/get_image?filename={monitoring_filename}"
+
+    if plot_url and monitoring_url:
+        return jsonify({
+            'plot_url': plot_url,
+            'monitoring_url': monitoring_url
+        })
+    else:
+        return jsonify({'error': 'Le graphique demandé n\'existe pas.'}), 404
+
+@app.route('/get_image', methods=['GET'])
+def get_image():
+    filename = request.args.get('filename')
+
+    if not filename or not os.path.exists(filename):
+        return jsonify({'error': 'Le fichier demandé n\'existe pas.'}), 404
+
+    return send_file(filename, mimetype='image/png')
+
 
 if __name__ == '__main__':
     app.run(debug=True)
