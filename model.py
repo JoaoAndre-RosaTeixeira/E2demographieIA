@@ -1,10 +1,8 @@
 import base64
 import io
-import joblib
 from pmdarima import auto_arima
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 import matplotlib.pyplot as plt
-from google.cloud import storage
 
 def get_best_arima_model(series):
     model = auto_arima(series, seasonal=False, trace=True, error_action='ignore', suppress_warnings=True, stepwise=True)
@@ -26,22 +24,27 @@ def predict_population(model, start_year, end_year):
     forecast_df = forecast.summary_frame()
     return forecast_df
 
-def save_plot_to_gcs(fig, bucket_name, blob_name):
-    """Sauvegarde une figure matplotlib sur GCS."""
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png')
-    buf.seek(0)
-    
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(blob_name)
-    blob.upload_from_file(buf, content_type='image/png')
-    
-    buf.close()
-    plt.close(fig)
-    print(f"File {blob_name} uploaded to {bucket_name}.")
 
-def plot_population_forecast(series, forecast_df, bucket_name, blob_name):
+def train_and_evaluate(series, eval_year):
+    series = series.interpolate(method='linear').dropna()
+    train_series = series[series.index.year < eval_year]
+    test_series = series[series.index.year == eval_year]
+
+    model = auto_arima(train_series, seasonal=False, trace=True, error_action='ignore', suppress_warnings=True, stepwise=True)
+    best_order = model.order
+    best_seasonal_order = model.seasonal_order
+    print(f"Meilleure configuration trouvée : ordre={best_order}, ordre saisonnier={best_seasonal_order}")
+
+    results = model.fit(train_series)
+    forecast = results.predict(n_periods=len(test_series))
+    predicted_value = forecast[0]
+    actual_value = test_series.iloc[0]
+
+    accuracy = 100 - abs(predicted_value - actual_value) / actual_value * 100
+
+    return accuracy, best_order, best_seasonal_order
+
+def plot_population_forecast(series, forecast_df, local_path):
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(series, label='Historical Population')
     ax.plot(forecast_df['mean'], label='Forecasted Population')
@@ -53,9 +56,10 @@ def plot_population_forecast(series, forecast_df, bucket_name, blob_name):
     ax.legend()
     ax.grid(True)
     
-    save_plot_to_gcs(fig, bucket_name, blob_name)
+    fig.savefig(local_path)
+    plt.close(fig)
 
-def generate_monitoring_plot(code, entity_type, bucket_name, blob_name):
+def generate_monitoring_plot(code, entity_type, local_path):
     epochs = list(range(1, 11))
     accuracy = [0.8 + 0.01 * i for i in range(10)]
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -66,4 +70,5 @@ def generate_monitoring_plot(code, entity_type, bucket_name, blob_name):
     ax.legend()
     ax.grid(True)
     
-    save_plot_to_gcs(fig, bucket_name, blob_name)
+    fig.savefig(local_path)
+    plt.close(fig)

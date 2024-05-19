@@ -195,28 +195,20 @@ def predict(entity_type):
 
     # Vérifier si le modèle existe déjà
     bucket_name = 'my-flask-app-bucket'
-    model_filename = f"{entity_type}_{code}_{target_year}.pkl"
-    local_model_path = f"/tmp/{model_filename}"  # Utiliser un chemin absolu pour éviter les problèmes de chemin relatif
+    model_filename = f"models/{entity_type}_{code}_{series.index[-1].year}.pkl"
+    local_model_path = f"/tmp/{model_filename}"
     
     bucket = storage.Client().bucket(bucket_name)
-    blob = bucket.blob(model_filename)
-    
-    try:
-        if blob.exists():
-            print(f"Téléchargement du modèle depuis {model_filename}...")
-            blob.download_to_filename(local_model_path)
-            print(f"Modèle téléchargé avec succès depuis {model_filename}.")
-            model = joblib.load(local_model_path)
-            print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
-        else:
-            print(f"Entraînement d'un nouveau modèle pour {entity_type} avec code {code}.")
-            model = get_best_arima_model(series)
-            joblib.dump(model, local_model_path)
-            save_to_gcs(bucket_name, local_model_path, model_filename)
-            print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
-    except Exception as e:
-        print(f"Erreur lors du traitement du modèle : {e}")
-        return jsonify({'error': 'Erreur lors du traitement du modèle.'}), 500
+    if bucket.blob(model_filename).exists():
+        download_from_gcs(bucket_name, model_filename, local_model_path)
+        model = joblib.load(local_model_path)
+        print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
+    else:
+        # Entraîner et sauvegarder le modèle
+        model = get_best_arima_model(series)
+        joblib.dump(model, local_model_path)
+        save_to_gcs(bucket_name, local_model_path, model_filename)
+        print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
 
     # Prédiction
     forecast_df = model.predict(n_periods=target_year - series.index[-1].year)
@@ -227,18 +219,20 @@ def predict(entity_type):
     # Sauvegarder le graphique
     plot_filename = f"plots/{entity_type}_{code}_{target_year}.png"
     local_plot_path = f"/tmp/{plot_filename}"
+    plot_blob_name = f"plots/{entity_type}_{code}_{target_year}.png"
+
     plot_monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{target_year}.png"
     local_monitoring_plot_path = f"/tmp/{plot_monitoring_filename}"
-    
+    monitoring_blob_name = f"plots/monitoring_{entity_type}_{code}_{target_year}.png"
+
     plot_population_forecast(series, forecast_df, local_plot_path)
     generate_monitoring_plot(code, entity_type, local_monitoring_plot_path)
-    
-    save_to_gcs(bucket_name, local_plot_path, plot_filename)
-    save_to_gcs(bucket_name, local_monitoring_plot_path, plot_monitoring_filename)
+    save_to_gcs(bucket_name, local_plot_path, plot_blob_name)
+    save_to_gcs(bucket_name, local_monitoring_plot_path, monitoring_blob_name)
 
-    # Rendre les fichiers publics
-    make_blob_public(bucket_name, plot_filename)
-    make_blob_public(bucket_name, plot_monitoring_filename)
+    # Rendre les blobs publics
+    make_blob_public(bucket_name, plot_blob_name)
+    make_blob_public(bucket_name, monitoring_blob_name)
 
     # Construction de la réponse
     response = {
@@ -246,7 +240,7 @@ def predict(entity_type):
         'nom': entity.nom,
         'target_year': target_year,
         'predicted_population': int(predicted_value),
-        'plot_url': f"/get_plot/{entity_type}?code={code}&year={target_year}",
+        'plot_url': f"https://storage.googleapis.com/{bucket_name}/{plot_blob_name}",
     }
 
     if entity_type == 'commune':
