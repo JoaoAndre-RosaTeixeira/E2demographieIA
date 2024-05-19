@@ -6,7 +6,6 @@ def test_get_best_arima_model():
     model = get_best_arima_model(series)
     assert model is not None
 
-
 def test_plot_population_forecast():
     series = pd.Series([100, 200, 300, 400, 500], index=pd.date_range("2020-01-01", periods=5, freq='YS'))
     forecast_df = pd.DataFrame({'mean': [150, 250, 350]}, index=pd.date_range("2025-01-01", periods=3, freq='YS'))

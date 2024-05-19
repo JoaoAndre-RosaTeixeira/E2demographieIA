@@ -1,19 +1,21 @@
 import pytest
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
-from app import app as flask_app, db as flask_db, FlaskApp
+from app import create_app, db
 
-@pytest.fixture
+@pytest.fixture(scope='module')
 def app():
-    yield flask_app
+    app = create_app({
+        'TESTING': True,
+        'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
+        'SQLALCHEMY_TRACK_MODIFICATIONS': False,
+        'GCP_PROJECT_ID': 'test-project',
+        'GCS_BUCKET_NAME': 'test-bucket'
+    })
 
-@pytest.fixture
-def db(app):
     with app.app_context():
-        flask_db.create_all()
-        yield flask_db
-        flask_db.drop_all()
+        db.create_all()
+        yield app
+        db.drop_all()
 
-@pytest.fixture
+@pytest.fixture(scope='module')
 def client(app):
     return app.test_client()

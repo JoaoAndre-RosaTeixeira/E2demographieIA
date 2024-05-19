@@ -11,12 +11,43 @@ import joblib
 from google.cloud import secretmanager, storage
 from model import get_best_arima_model, plot_population_forecast, generate_monitoring_plot
 
-# Configuration de l'application Flask
-app = Flask(__name__)
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
+db = SQLAlchemy()
 
-# Définition des modèles SQLAlchemy
+def create_app(config=None):
+    app = Flask(__name__)
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+    if config:
+        app.config.update(config)
+
+    db.init_app(app)
+
+    with app.app_context():
+        # Initialisation de SQLAlchemy avec Flask
+        db.create_all()
+
+        # Configuration des routes
+        flask_app = FlaskApp(app, db, project_id=app.config.get("GCP_PROJECT_ID", "dev-ia-e1"), 
+                             bucket_name=app.config.get("GCS_BUCKET_NAME", "my-flask-app-bucket"))
+
+        @app.route('/<entity_type>', methods=['GET'])
+        def get_data(entity_type):
+            return flask_app.get_data(entity_type)
+
+        @app.route('/predict/<entity_type>', methods=['GET'])
+        def predict(entity_type):
+            return flask_app.predict(entity_type)
+
+        @app.route('/get_plot/<entity_type>', methods=['GET'])
+        def get_plot(entity_type):
+            return flask_app.get_plot(entity_type)
+
+        @app.route('/get_image', methods=['GET'])
+        def get_image():
+            return flask_app.get_image()
+
+    return app
+
 class Commune(db.Model):
     __tablename__ = 'communes'
     code = Column(String(10), primary_key=True)
@@ -45,7 +76,6 @@ class PopulationParAnnee(db.Model):
     annee = Column(Integer, primary_key=True)
     population = Column(Integer)
 
-# Configuration des entités avec leurs attributs correspondants
 entity_config = {
     'commune': {'model': Commune, 'code_attr': 'code', 'population_relationship': 'populations'},
     'departement': {'model': Departement, 'code_attr': 'code', 'population_relationship': 'communes'},
@@ -293,26 +323,8 @@ class FlaskApp:
         plot_buffer = self.download_plot_from_gcs(filename)
         return send_file(plot_buffer, mimetype='image/png')
 
-
-flask_app = FlaskApp(app, db, project_id="dev-ia-e1", bucket_name="my-flask-app-bucket")
-
-@app.route('/<entity_type>', methods=['GET'])
-def get_data(entity_type):
-    return flask_app.get_data(entity_type)
-
-@app.route('/predict/<entity_type>', methods=['GET'])
-def predict(entity_type):
-    return flask_app.predict(entity_type)
-
-@app.route('/get_plot/<entity_type>', methods=['GET'])
-def get_plot(entity_type):
-    return flask_app.get_plot(entity_type)
-
-@app.route('/get_image', methods=['GET'])
-def get_image():
-    return flask_app.get_image()
-
 if __name__ == '__main__':
+    app = create_app()
     port = int(os.environ.get("PORT", 8080))
     print(f"Starting Flask application on port {port}")
     app.run(host='0.0.0.0', port=port, debug=True)
