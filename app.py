@@ -1,4 +1,5 @@
 from urllib.parse import quote_plus
+import zipfile
 from flask import Flask, jsonify, request, send_file
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, ForeignKey
@@ -9,24 +10,13 @@ import os
 import matplotlib
 matplotlib.use('Agg')
 
-from google.cloud import secretmanager
-
-def get_secret(secret_id, project_id):
-    """Retrieve a secret from Google Cloud Secret Manager."""
-    client = secretmanager.SecretManagerServiceClient()
-    secret_name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
-    response = client.access_secret_version(name=secret_name)
-    secret_value = response.payload.data.decode('UTF-8')
-    return secret_value
-
-# Exemple d'utilisation
-project_id = "dev-ia-e1"  # Remplacez par votre ID de projet Google Cloud
-db_url = get_secret('database-url', project_id)
 
 # Configuration de l'application Flask
 app = Flask(__name__)
-print(db_url)
-app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+password = "^Te+7Qib&Q\"%@X>>"
+encoded_password = quote_plus(password)
+database_url = f'postgresql+psycopg2://postgres:{encoded_password}@34.155.209.64:5432/dev-ia-e1'
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialisation de SQLAlchemy avec Flask
