@@ -1,5 +1,5 @@
 import os
-from flask import Flask, jsonify, request, send_file, redirect
+from flask import Flask, jsonify, request, send_file
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
@@ -20,7 +20,6 @@ def get_secret(secret_id, project_id):
     return secret_value
 
 # Exemple d'utilisation
-bucket_name = 'my-flask-app-bucket'  
 project_id = "dev-ia-e1"
 db_url = get_secret('database-url', project_id)
 
@@ -67,6 +66,33 @@ entity_config = {
     'departement': {'model': Departement, 'code_attr': 'code', 'population_relationship': 'communes'},
     'region': {'model': Region, 'code_attr': 'code', 'population_relationship': 'departements'}
 }
+
+def save_to_gcs(bucket_name, source_file_name, destination_blob_name):
+    """Uploads a file to the bucket."""
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(destination_blob_name)
+
+    blob.upload_from_filename(source_file_name)
+    print(f"File {source_file_name} uploaded to {destination_blob_name}.")
+
+def download_from_gcs(bucket_name, source_blob_name, destination_file_name):
+    """Downloads a file from the bucket."""
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(source_blob_name)
+
+    blob.download_to_filename(destination_file_name)
+    print(f"File {source_blob_name} downloaded to {destination_file_name}.")
+
+def make_blob_public(bucket_name, blob_name):
+    """Renders a blob publicly accessible."""
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+
+    blob.make_public()
+    print(f"Blob {blob_name} is now publicly accessible at {blob.public_url}")
 
 @app.route('/<entity_type>', methods=['GET'])
 def get_data(entity_type):
@@ -168,22 +194,29 @@ def predict(entity_type):
     series = series.interpolate(method='linear').dropna()  # Supprimer les NaN par interpolation linéaire
 
     # Vérifier si le modèle existe déjà
+    bucket_name = 'my-flask-app-bucket'
     model_filename = f"{entity_type}_{code}_{target_year}.pkl"
-    local_model_path = f"models/{model_filename}"
+    local_model_path = f"/tmp/{model_filename}"  # Utiliser un chemin absolu pour éviter les problèmes de chemin relatif
     
     bucket = storage.Client().bucket(bucket_name)
-    if bucket.blob(model_filename).exists():
-        blob = bucket.blob(model_filename)
-        blob.download_to_filename(local_model_path)
-        model = joblib.load(local_model_path)
-        print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
-    else:
-        # Entraîner et sauvegarder le modèle
-        model = get_best_arima_model(series)
-        joblib.dump(model, local_model_path)
-        blob = bucket.blob(model_filename)
-        blob.upload_from_filename(local_model_path)
-        print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
+    blob = bucket.blob(model_filename)
+    
+    try:
+        if blob.exists():
+            print(f"Téléchargement du modèle depuis {model_filename}...")
+            blob.download_to_filename(local_model_path)
+            print(f"Modèle téléchargé avec succès depuis {model_filename}.")
+            model = joblib.load(local_model_path)
+            print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
+        else:
+            print(f"Entraînement d'un nouveau modèle pour {entity_type} avec code {code}.")
+            model = get_best_arima_model(series)
+            joblib.dump(model, local_model_path)
+            save_to_gcs(bucket_name, local_model_path, model_filename)
+            print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
+    except Exception as e:
+        print(f"Erreur lors du traitement du modèle : {e}")
+        return jsonify({'error': 'Erreur lors du traitement du modèle.'}), 500
 
     # Prédiction
     forecast_df = model.predict(n_periods=target_year - series.index[-1].year)
@@ -193,9 +226,19 @@ def predict(entity_type):
 
     # Sauvegarder le graphique
     plot_filename = f"plots/{entity_type}_{code}_{target_year}.png"
-    plot_population_forecast(series, forecast_df, bucket_name, plot_filename)
+    local_plot_path = f"/tmp/{plot_filename}"
     plot_monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{target_year}.png"
-    generate_monitoring_plot(code, entity_type, bucket_name, plot_monitoring_filename)
+    local_monitoring_plot_path = f"/tmp/{plot_monitoring_filename}"
+    
+    plot_population_forecast(series, forecast_df, local_plot_path)
+    generate_monitoring_plot(code, entity_type, local_monitoring_plot_path)
+    
+    save_to_gcs(bucket_name, local_plot_path, plot_filename)
+    save_to_gcs(bucket_name, local_monitoring_plot_path, plot_monitoring_filename)
+
+    # Rendre les fichiers publics
+    make_blob_public(bucket_name, plot_filename)
+    make_blob_public(bucket_name, plot_monitoring_filename)
 
     # Construction de la réponse
     response = {
@@ -235,9 +278,20 @@ def get_plot(entity_type):
         return jsonify({'error': f'{entity_type.capitalize()} avec code {code} non trouvé.'}), 404
 
     plot_filename = f"plots/{entity_type}_{code}_{year}.png"
-    plot_url = f"https://storage.googleapis.com/{bucket_name}/{plot_filename}"
+    local_plot_path = f"/tmp/{plot_filename}"
     monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{year}.png"
-    monitoring_url = f"https://storage.googleapis.com/{bucket_name}/{monitoring_filename}"
+    local_monitoring_plot_path = f"/tmp/{monitoring_filename}"
+
+    bucket_name = 'my-flask-app-bucket'
+    bucket = storage.Client().bucket(bucket_name)
+    if not bucket.blob(plot_filename).exists():
+        return jsonify({'error': 'Le graphique demandé n\'existe pas.'}), 404
+
+    download_from_gcs(bucket_name, plot_filename, local_plot_path)
+    download_from_gcs(bucket_name, monitoring_filename, local_monitoring_plot_path)
+
+    plot_url = f"/get_image?filename={local_plot_path}"
+    monitoring_url = f"/get_image?filename={local_monitoring_plot_path}"
 
     return jsonify({
         'plot_url': plot_url,
@@ -251,7 +305,7 @@ def get_image():
     if not filename:
         return jsonify({'error': 'Le fichier demandé n\'existe pas.'}), 404
 
-    return redirect(filename)
+    return send_file(filename, mimetype='image/png')
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))
