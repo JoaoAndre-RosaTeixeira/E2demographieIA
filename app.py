@@ -21,6 +21,7 @@ def create_app(config=None):
         app.config.update(config)
 
     with app.app_context():
+        # Configuration de la base de données
         app.config['SQLALCHEMY_DATABASE_URI'] = app.config.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///:memory:')
 
         if 'sqlalchemy' not in app.extensions:
@@ -153,7 +154,6 @@ class FlaskApp:
         if not entities:
             return jsonify(message="No entities found"), 404
 
-        response = {}
         for entity in entities:
             if entity_type == 'commune':
                 populations = entity.populations if year is None else [pop for pop in entity.populations if pop.annee == year]
@@ -176,14 +176,14 @@ class FlaskApp:
                 else:
                     population_summary[pop.annee] = pop.population
 
-            response = {
-                'code': entity.code,
-                'nom': entity.nom,
-                'populations': [{'annee': k, 'population': v} for k, v in sorted(population_summary.items())]
-            }
+        response = {
+            'code': entity.code,
+            'nom': entity.nom,
+            'populations': [{'annee': k, 'population': v} for k, v in sorted(population_summary.items())]
+        }
 
-            if entity_type == 'commune':
-                response['codes_postaux'] = entity.codes_postaux
+        if entity_type == 'commune':
+            response['codes_postaux'] = entity.codes_postaux
 
         return jsonify(response)
 
@@ -192,7 +192,7 @@ class FlaskApp:
         target_year = request.args.get('year')
 
         if not code or not target_year:
-            return jsonify({'error': 'Veuillez fournir les paramètres "code" et "year".'}), 400
+            return jsonify({'error': 'Veuillez fournir les paramètres "code" et "target_year".'}), 400
 
         try:
             target_year = int(target_year)
