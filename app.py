@@ -10,11 +10,24 @@ import os
 import matplotlib
 matplotlib.use('Agg')
 
+from google.cloud import secretmanager
+
+def get_secret(secret_id, project_id):
+    """Retrieve a secret from Google Cloud Secret Manager."""
+    client = secretmanager.SecretManagerServiceClient()
+    secret_name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
+    response = client.access_secret_version(name=secret_name)
+    secret_value = response.payload.data.decode('UTF-8')
+    return secret_value
+
+# Exemple d'utilisation
+project_id = "dev-ia-e1"  # Remplacez par votre ID de projet Google Cloud
+db_url = get_secret('database-url', project_id)
+
 # Configuration de l'application Flask
 app = Flask(__name__)
-password = "^Te+7Qib&Q\"%@X>>"
-encoded_password = quote_plus(password)
-database_url = f'postgresql+psycopg2://postgres:{encoded_password}@34.155.209.64:5432/dev-ia-e1'
+print(db_url)
+database_url = quote_plus(db_url)
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -331,4 +344,4 @@ def get_image():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))
     print(f"Starting Flask application on port {port}")
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=True)
