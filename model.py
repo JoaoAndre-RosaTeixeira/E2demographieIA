@@ -93,3 +93,4 @@ def generate_monitoring_plot(code, entity_type, monitoring_filename):
     plt.grid(True)
     plt.savefig(monitoring_filename)
     plt.close()
+    

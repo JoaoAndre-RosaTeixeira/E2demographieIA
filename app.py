@@ -75,9 +75,7 @@ def save_to_gcs(bucket_name, source_file_name, destination_blob_name):
 
     blob.upload_from_filename(source_file_name)
 
-    print(
-        f"File {source_file_name} uploaded to {destination_blob_name}."
-    )
+    print(f"File {source_file_name} uploaded to {destination_blob_name}.")
 
 def download_from_gcs(bucket_name, source_blob_name, destination_file_name):
     """Downloads a file from the bucket."""
@@ -87,9 +85,7 @@ def download_from_gcs(bucket_name, source_blob_name, destination_file_name):
 
     blob.download_to_filename(destination_file_name)
 
-    print(
-        f"File {source_blob_name} downloaded to {destination_file_name}."
-    )
+    print(f"File {source_blob_name} downloaded to {destination_file_name}.")
 
 @app.route('/<entity_type>', methods=['GET'])
 def get_data(entity_type):
@@ -195,7 +191,8 @@ def predict(entity_type):
     model_filename = f"{entity_type}_{code}_{series.index[-1].year}.pkl"
     local_model_path = f"/tmp/{model_filename}"
     
-    if storage.Client().bucket(bucket_name).blob(model_filename).exists() and series.index[-1].year <= target_year:
+    bucket = storage.Client().bucket(bucket_name)
+    if bucket.blob(model_filename).exists() and series.index[-1].year <= target_year:
         download_from_gcs(bucket_name, model_filename, local_model_path)
         model = joblib.load(local_model_path)
         print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
@@ -218,7 +215,7 @@ def predict(entity_type):
     plot_monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{target_year}.png"
     local_monitoring_plot_path = f"/tmp/{plot_monitoring_filename}"
     plot_population_forecast(series, forecast_df, local_plot_path)
-    generate_monitoring_plot(series, forecast_df, local_monitoring_plot_path)
+    generate_monitoring_plot(code, entity_type, local_monitoring_plot_path)
     save_to_gcs(bucket_name, local_plot_path, plot_filename)
     save_to_gcs(bucket_name, local_monitoring_plot_path, plot_monitoring_filename)
 
@@ -265,7 +262,8 @@ def get_plot(entity_type):
     local_monitoring_plot_path = f"/tmp/{monitoring_filename}"
 
     bucket_name = 'my-flask-app-bucket'
-    if not storage.Client().bucket(bucket_name).blob(plot_filename).exists():
+    bucket = storage.Client().bucket(bucket_name)
+    if not bucket.blob(plot_filename).exists():
         return jsonify({'error': 'Le graphique demandé n\'existe pas.'}), 404
 
     download_from_gcs(bucket_name, plot_filename, local_plot_path)
@@ -283,7 +281,7 @@ def get_plot(entity_type):
 def get_image():
     filename = request.args.get('filename')
 
-    if not filename or not os.path.exists(filename):
+    if not filename:
         return jsonify({'error': 'Le fichier demandé n\'existe pas.'}), 404
 
     return send_file(filename, mimetype='image/png')
