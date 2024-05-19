@@ -1,5 +1,5 @@
 import os
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, send_file, redirect
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
@@ -66,26 +66,6 @@ entity_config = {
     'departement': {'model': Departement, 'code_attr': 'code', 'population_relationship': 'communes'},
     'region': {'model': Region, 'code_attr': 'code', 'population_relationship': 'departements'}
 }
-
-def save_to_gcs(bucket_name, source_file_name, destination_blob_name):
-    """Uploads a file to the bucket."""
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(destination_blob_name)
-
-    blob.upload_from_filename(source_file_name)
-
-    print(f"File {source_file_name} uploaded to {destination_blob_name}.")
-
-def download_from_gcs(bucket_name, source_blob_name, destination_file_name):
-    """Downloads a file from the bucket."""
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(source_blob_name)
-
-    blob.download_to_filename(destination_file_name)
-
-    print(f"File {source_blob_name} downloaded to {destination_file_name}.")
 
 @app.route('/<entity_type>', methods=['GET'])
 def get_data(entity_type):
@@ -193,14 +173,16 @@ def predict(entity_type):
     
     bucket = storage.Client().bucket(bucket_name)
     if bucket.blob(model_filename).exists():
-        download_from_gcs(bucket_name, model_filename, local_model_path)
+        blob = bucket.blob(model_filename)
+        blob.download_to_filename(local_model_path)
         model = joblib.load(local_model_path)
         print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
     else:
         # Entraîner et sauvegarder le modèle
         model = get_best_arima_model(series)
         joblib.dump(model, local_model_path)
-        save_to_gcs(bucket_name, local_model_path, model_filename)
+        blob = bucket.blob(model_filename)
+        blob.upload_from_filename(local_model_path)
         print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
 
     # Prédiction
@@ -211,13 +193,9 @@ def predict(entity_type):
 
     # Sauvegarder le graphique
     plot_filename = f"plots/{entity_type}_{code}_{target_year}.png"
-    local_plot_path = f"/tmp/{plot_filename}"
+    plot_population_forecast(series, forecast_df, bucket_name, plot_filename)
     plot_monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{target_year}.png"
-    local_monitoring_plot_path = f"/tmp/{plot_monitoring_filename}"
-    plot_population_forecast(series, forecast_df, local_plot_path)
-    generate_monitoring_plot(code, entity_type, local_monitoring_plot_path)
-    save_to_gcs(bucket_name, local_plot_path, plot_filename)
-    save_to_gcs(bucket_name, local_monitoring_plot_path, plot_monitoring_filename)
+    generate_monitoring_plot(code, entity_type, bucket_name, plot_monitoring_filename)
 
     # Construction de la réponse
     response = {
@@ -257,20 +235,9 @@ def get_plot(entity_type):
         return jsonify({'error': f'{entity_type.capitalize()} avec code {code} non trouvé.'}), 404
 
     plot_filename = f"plots/{entity_type}_{code}_{year}.png"
-    local_plot_path = f"/tmp/{plot_filename}"
+    plot_url = f"https://storage.googleapis.com/{bucket_name}/{plot_filename}"
     monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{year}.png"
-    local_monitoring_plot_path = f"/tmp/{monitoring_filename}"
-
-    bucket_name = 'my-flask-app-bucket'
-    bucket = storage.Client().bucket(bucket_name)
-    if not bucket.blob(plot_filename).exists():
-        return jsonify({'error': 'Le graphique demandé n\'existe pas.'}), 404
-
-    download_from_gcs(bucket_name, plot_filename, local_plot_path)
-    download_from_gcs(bucket_name, monitoring_filename, local_monitoring_plot_path)
-
-    plot_url = f"/get_image?filename={local_plot_path}"
-    monitoring_url = f"/get_image?filename={local_monitoring_plot_path}"
+    monitoring_url = f"https://storage.googleapis.com/{bucket_name}/{monitoring_filename}"
 
     return jsonify({
         'plot_url': plot_url,
@@ -284,7 +251,7 @@ def get_image():
     if not filename:
         return jsonify({'error': 'Le fichier demandé n\'existe pas.'}), 404
 
-    return send_file(filename, mimetype='image/png')
+    return redirect(filename)
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))
