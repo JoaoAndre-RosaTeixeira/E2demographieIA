@@ -168,8 +168,8 @@ def predict(entity_type):
     series = series.interpolate(method='linear').dropna()  # Supprimer les NaN par interpolation linéaire
 
     # Vérifier si le modèle existe déjà
-    model_filename = f"{entity_type}_{code}_{series.index[-1].year}.pkl"
-    local_model_path = f"/tmp/{model_filename}"
+    model_filename = f"{entity_type}_{code}_{target_year}.pkl"
+    local_model_path = f"/tmp/models/{model_filename}"
     
     bucket = storage.Client().bucket(bucket_name)
     if bucket.blob(model_filename).exists():
