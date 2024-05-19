@@ -20,13 +20,14 @@ def create_app(config=None):
     if config:
         app.config.update(config)
 
-    db.init_app(app)
-
     with app.app_context():
-        # Initialisation de SQLAlchemy avec Flask
-        db.create_all()
+        # Configuration de la base de données
+        app.config['SQLALCHEMY_DATABASE_URI'] = app.config.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///:memory:')
 
-        # Configuration des routes
+        if 'sqlalchemy' not in app.extensions:
+            db.init_app(app)
+            db.create_all()
+
         flask_app = FlaskApp(app, db, project_id=app.config.get("GCP_PROJECT_ID", "dev-ia-e1"), 
                              bucket_name=app.config.get("GCS_BUCKET_NAME", "my-flask-app-bucket"))
 
@@ -102,7 +103,9 @@ class FlaskApp:
     def configure_db(self):
         db_url = self.get_secret('database-url')
         self.app.config['SQLALCHEMY_DATABASE_URI'] = db_url
-        self.db.init_app(self.app)
+        if 'sqlalchemy' not in self.app.extensions:
+            self.db.init_app(self.app)
+            self.db.create_all()
 
     def save_to_gcs(self, model, destination_blob_name):
         """Serialize the model and upload to GCS."""

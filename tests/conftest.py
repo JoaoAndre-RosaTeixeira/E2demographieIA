@@ -1,6 +1,10 @@
+import sys
+import os
 import pytest
-from app import create_app, db
 from unittest.mock import patch
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from app import create_app, db as _db
+
 
 @pytest.fixture(scope='module')
 def app():
@@ -19,10 +23,19 @@ def app():
         })
 
         with app.app_context():
-            db.create_all()
+            _db.create_all()
             yield app
-            db.drop_all()
+            _db.drop_all()
 
 @pytest.fixture(scope='module')
 def client(app):
     return app.test_client()
+
+@pytest.fixture(scope='function')
+def db(app):
+    with app.app_context():
+        _db.drop_all()
+        _db.create_all()
+        yield _db
+        _db.session.remove()
+        _db.drop_all()
