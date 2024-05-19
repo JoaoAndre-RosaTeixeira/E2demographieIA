@@ -1,27 +1,45 @@
-import pytest
-import sys
-import os
+import io
+import json
 import pandas as pd
-from pmdarima import auto_arima
+from unittest.mock import patch
+from model import train_arima, get_best_arima_model
 
-# Ajouter le répertoire racine au chemin de recherche des modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+def test_get_data(client, db):
+    # Setup test data
+    from app import Commune, PopulationParAnnee
+    commune = Commune(code="12345", nom="Test Commune")
+    db.session.add(commune)
+    db.session.commit()
+    population = PopulationParAnnee(code_commune="12345", annee=2020, population=1000)
+    db.session.add(population)
+    db.session.commit()
 
-from model import get_best_arima_model, train_and_evaluate
+    response = client.get('/commune?code=12345')
+    data = json.loads(response.data)
+    assert response.status_code == 200
+    assert data['code'] == "12345"
+    assert data['nom'] == "Test Commune"
 
-@pytest.fixture
-def sample_series():
-    dates = pd.date_range(start='2000-01-01', periods=20, freq='YS')
-    data = [x * 100 for x in range(20)]
-    return pd.Series(data=data, index=dates)
+@patch("app.FlaskApp.load_from_gcs")
+@patch("app.FlaskApp.save_to_gcs")
+def test_predict(mock_save_to_gcs, mock_load_from_gcs, client, db):
+    from app import Commune, PopulationParAnnee
+    commune = Commune(code="12345", nom="Test Commune")
+    db.session.add(commune)
+    db.session.commit()
+    for year in range(2010, 2021):
+        population = PopulationParAnnee(code_commune="12345", annee=year, population=1000 + 10 * (year - 2010))
+        db.session.add(population)
+    db.session.commit()
 
-def test_get_best_arima_model(sample_series):
-    model = get_best_arima_model(sample_series)
-    assert model is not None
+    mock_load_from_gcs.return_value = None  # Simulate no existing model
+    response = client.get('/predict/commune?code=12345&year=2030')
+    data = json.loads(response.data)
+    assert response.status_code == 200
+    assert 'predicted_population' in data
 
-
-def test_train_and_evaluate(sample_series):
-    accuracy, best_order, best_seasonal_order = train_and_evaluate(sample_series, 2018)
-    assert accuracy is not None
-    assert isinstance(best_order, tuple)
-    assert isinstance(best_seasonal_order, tuple)
+def test_get_plot(client, db):
+    response = client.get('/get_plot/commune?code=12345&year=2030')
+    data = json.loads(response.data)
+    assert response.status_code == 200
+    assert 'plot_url' in data
