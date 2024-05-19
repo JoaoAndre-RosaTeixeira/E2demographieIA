@@ -1,6 +1,4 @@
-import base64
 import io
-import joblib
 from pmdarima import auto_arima
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 import matplotlib.pyplot as plt
@@ -12,12 +10,6 @@ def get_best_arima_model(series):
     best_seasonal_order = model.seasonal_order
     print(f"Meilleure configuration trouvée : ordre={best_order}, ordre saisonnier={best_seasonal_order}")
     return model
-
-def train_arima(series):
-    """Entraîne un modèle ARIMA sur les séries temporelles spécifiées."""
-    model = SARIMAX(series, order=(1, 1, 1), seasonal_order=(0, 0, 0, 0))
-    results = model.fit(disp=False)
-    return results
 
 def predict_population(model, start_year, end_year):
     """Génère des prévisions de population à partir d'un modèle ARIMA."""

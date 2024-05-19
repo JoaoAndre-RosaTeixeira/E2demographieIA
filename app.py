@@ -1,5 +1,5 @@
 import os
-from flask import Flask, jsonify, request, send_file, redirect
+from flask import Flask, jsonify, request, redirect
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
