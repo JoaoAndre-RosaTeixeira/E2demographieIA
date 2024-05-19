@@ -2,7 +2,7 @@ import io
 import json
 import pandas as pd
 from unittest.mock import patch
-from model import train_arima, get_best_arima_model
+from model import get_best_arima_model
 
 def test_get_data(client, db):
     # Setup test data
