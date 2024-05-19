@@ -1,5 +1,5 @@
 import os
-from flask import Flask, jsonify, request, redirect
+from flask import Flask, jsonify, request, send_file, redirect
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
@@ -85,17 +85,7 @@ def download_from_gcs(bucket_name, source_blob_name, destination_file_name):
 
     blob.download_to_filename(destination_file_name)
     print(f"File {source_blob_name} downloaded to {destination_file_name}.")
-    
-def generate_signed_url(bucket_name, blob_name, expiration=3600):
-    """Génère une URL signée pour accéder à un blob de manière temporaire."""
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(blob_name)
-    
-    url = blob.generate_signed_url(expiration=expiration)
-    print(f"Generated signed URL for {blob_name}: {url}")
-    return url
-
+        
 @app.route('/<entity_type>', methods=['GET'])
 def get_data(entity_type):
     code = request.args.get('code', default=None)
@@ -223,17 +213,13 @@ def predict(entity_type):
     plot_monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{target_year}.png"
     generate_monitoring_plot(code, entity_type, bucket_name, plot_monitoring_filename)
 
-    # Générer des URLs signées pour les graphiques
-    plot_url = generate_signed_url(bucket_name, plot_filename)
-    monitoring_url = generate_signed_url(bucket_name, plot_monitoring_filename)
-
     # Construction de la réponse
     response = {
         'code': entity.code,
         'nom': entity.nom,
         'target_year': target_year,
         'predicted_population': int(predicted_value),
-        'plot_url': plot_url,
+        'plot_url': f"/get_plot/{entity_type}?code={code}&year={target_year}",
     }
 
     if entity_type == 'commune':
@@ -265,9 +251,9 @@ def get_plot(entity_type):
         return jsonify({'error': f'{entity_type.capitalize()} avec code {code} non trouvé.'}), 404
 
     plot_filename = f"plots/{entity_type}_{code}_{year}.png"
-    plot_url = generate_signed_url(bucket_name, plot_filename)
+    plot_url = f"https://storage.googleapis.com/{bucket_name}/{plot_filename}"
     monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{year}.png"
-    monitoring_url = generate_signed_url(bucket_name, monitoring_filename)
+    monitoring_url = f"https://storage.googleapis.com/{bucket_name}/{monitoring_filename}"
 
     return jsonify({
         'plot_url': plot_url,
