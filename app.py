@@ -1,15 +1,15 @@
-from urllib.parse import quote_plus
+import os
 from flask import Flask, jsonify, request, send_file
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
 from model import load_model_info, plot_population_forecast, generate_monitoring_plot, save_model_info, train_and_evaluate, save_model, load_model, get_best_arima_model
 import pandas as pd
-import os
 import matplotlib
 matplotlib.use('Agg')
 
-from google.cloud import secretmanager
+from google.cloud import secretmanager, storage
+import joblib
 
 def get_secret(secret_id, project_id):
     """Retrieve a secret from Google Cloud Secret Manager."""
@@ -20,7 +20,7 @@ def get_secret(secret_id, project_id):
     return secret_value
 
 # Exemple d'utilisation
-project_id = "dev-ia-e1"  # Remplacez par votre ID de projet Google Cloud
+project_id = "dev-ia-e1"
 db_url = get_secret('database-url', project_id)
 
 # Configuration de l'application Flask
@@ -67,6 +67,30 @@ entity_config = {
     'region': {'model': Region, 'code_attr': 'code', 'population_relationship': 'departements'}
 }
 
+def save_to_gcs(bucket_name, source_file_name, destination_blob_name):
+    """Uploads a file to the bucket."""
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(destination_blob_name)
+
+    blob.upload_from_filename(source_file_name)
+
+    print(
+        f"File {source_file_name} uploaded to {destination_blob_name}."
+    )
+
+def download_from_gcs(bucket_name, source_blob_name, destination_file_name):
+    """Downloads a file from the bucket."""
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(source_blob_name)
+
+    blob.download_to_filename(destination_file_name)
+
+    print(
+        f"File {source_blob_name} downloaded to {destination_file_name}."
+    )
+
 @app.route('/<entity_type>', methods=['GET'])
 def get_data(entity_type):
     code = request.args.get('code', default=None)
@@ -87,7 +111,6 @@ def get_data(entity_type):
         return jsonify(message="No entities found"), 404
 
     for entity in entities:
-
         if entity_type == 'commune':
             populations = entity.populations if year is None else [pop for pop in entity.populations if pop.annee == year]
         else:
@@ -168,14 +191,19 @@ def predict(entity_type):
     series = series.interpolate(method='linear').dropna()  # Supprimer les NaN par interpolation linéaire
 
     # Vérifier si le modèle existe déjà
+    bucket_name = 'my-flask-app-bucket'
     model_filename = f"{entity_type}_{code}_{series.index[-1].year}.pkl"
-    if os.path.exists(os.path.join('models', model_filename)) and series.index[-1].year <= target_year:
-        model = load_model(f"models/{model_filename}")
+    local_model_path = f"/tmp/{model_filename}"
+    
+    if storage.Client().bucket(bucket_name).blob(model_filename).exists() and series.index[-1].year <= target_year:
+        download_from_gcs(bucket_name, model_filename, local_model_path)
+        model = joblib.load(local_model_path)
         print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
     else:
         # Entraîner et sauvegarder le modèle
         model = get_best_arima_model(series)
-        save_model(model, f"models/{model_filename}")
+        joblib.dump(model, local_model_path)
+        save_to_gcs(bucket_name, local_model_path, model_filename)
         print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
 
     # Prédiction
@@ -186,9 +214,13 @@ def predict(entity_type):
 
     # Sauvegarder le graphique
     plot_filename = f"plots/{entity_type}_{code}_{target_year}.png"
+    local_plot_path = f"/tmp/{plot_filename}"
     plot_monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{target_year}.png"
-    plot_population_forecast(series, forecast_df, plot_filename)
-    generate_monitoring_plot(series, forecast_df, plot_monitoring_filename)
+    local_monitoring_plot_path = f"/tmp/{plot_monitoring_filename}"
+    plot_population_forecast(series, forecast_df, local_plot_path)
+    generate_monitoring_plot(series, forecast_df, local_monitoring_plot_path)
+    save_to_gcs(bucket_name, local_plot_path, plot_filename)
+    save_to_gcs(bucket_name, local_monitoring_plot_path, plot_monitoring_filename)
 
     # Construction de la réponse
     response = {
@@ -199,91 +231,11 @@ def predict(entity_type):
         'plot_url': f"/get_plot/{entity_type}?code={code}&year={target_year}",
     }
 
-
     if entity_type == 'commune':
         response['codes_postaux'] = entity.codes_postaux
 
     return jsonify(response)
 
-@app.route('/train/<entity_type>', methods=['GET'])
-def train(entity_type):
-    code = request.args.get('code')
-
-    if not code:
-        return jsonify({'error': 'Veuillez fournir le paramètre "code".'}), 400
-
-    config = entity_config.get(entity_type)
-    if not config:
-        return jsonify(message="Invalid entity type"), 400
-
-    model = config['model']
-    entity = db.session.query(model).filter(getattr(model, config['code_attr']) == code).first()
-    if not entity:
-        return jsonify({'error': f'{entity_type.capitalize()} avec code {code} non trouvé.'}), 404
-
-    populations = []
-    if entity_type == 'commune':
-        populations = entity.populations
-    elif entity_type == 'departement':
-        for commune in entity.communes:
-            populations.extend(commune.populations)
-    elif entity_type == 'region':
-        for departement in entity.departements:
-            for commune in departement.communes:
-                populations.extend(commune.populations)
-
-    if not populations:
-        return jsonify({'error': f'Aucune donnée de population trouvée pour ce {entity_type}.'}), 404
-
-    population_summary = {}
-    for pop in populations:
-        if pop.annee in population_summary:
-            population_summary[pop.annee] += pop.population
-        else:
-            population_summary[pop.annee] = pop.population
-
-    series = pd.Series(data=list(population_summary.values()), index=pd.to_datetime(list(population_summary.keys()), format='%Y')).asfreq('YS')
-    series = series.interpolate(method='linear').dropna()
-
-    eval_year = series.index[-1].year
-
-    model_filename = f"{entity_type}_{code}_{eval_year}.pkl"
-    model_info_filename = f"train_models/{entity_type}_{code}_{eval_year}_info.json"
-
-    if os.path.exists(os.path.join('train_models', model_filename)) and os.path.exists(model_info_filename) and series.index[-1].year <= eval_year:
-        model = load_model(f"train_models/{model_filename}")
-        model_info = load_model_info(model_info_filename)
-        accuracy = model_info['accuracy']
-        best_order = model_info['best_order']
-        best_seasonal_order = model_info['best_seasonal_order']
-        print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
-    else:
-        accuracy, best_order, best_seasonal_order = train_and_evaluate(series, eval_year=eval_year)
-        model = get_best_arima_model(series)
-        save_model(model, f"train_models/{model_filename}")
-        model_info = {
-            'accuracy': accuracy,
-            'best_order': best_order,
-            'best_seasonal_order': best_seasonal_order
-        }
-        save_model_info(model_info, model_info_filename)
-        print(f"Modèle sauvegardé sous {model_filename} avec les informations d'évaluation {model_info_filename}.")
-    
-    response = {
-        'code': code,
-        'nom': entity.nom,
-        'accuracy': accuracy,
-        'best_order': best_order,
-        'best_seasonal_order': best_seasonal_order
-    }
-
-    if entity_type == 'commune':
-        response['codes_postaux'] = entity.codes_postaux
-
-    return jsonify(response)
-
-
-        
 @app.route('/get_plot/<entity_type>', methods=['GET'])
 def get_plot(entity_type):
     code = request.args.get('code')
@@ -308,24 +260,24 @@ def get_plot(entity_type):
         return jsonify({'error': f'{entity_type.capitalize()} avec code {code} non trouvé.'}), 404
 
     plot_filename = f"plots/{entity_type}_{code}_{year}.png"
+    local_plot_path = f"/tmp/{plot_filename}"
     monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{year}.png"
+    local_monitoring_plot_path = f"/tmp/{monitoring_filename}"
 
-    plot_url = None
-    monitoring_url = None
-
-    if os.path.exists(plot_filename):
-        plot_url = f"/get_image?filename={plot_filename}"
-
-    if os.path.exists(monitoring_filename):
-        monitoring_url = f"/get_image?filename={monitoring_filename}"
-
-    if plot_url and monitoring_url:
-        return jsonify({
-            'plot_url': plot_url,
-            'monitoring_url': monitoring_url
-        })
-    else:
+    bucket_name = 'my-flask-app-bucket'
+    if not storage.Client().bucket(bucket_name).blob(plot_filename).exists():
         return jsonify({'error': 'Le graphique demandé n\'existe pas.'}), 404
+
+    download_from_gcs(bucket_name, plot_filename, local_plot_path)
+    download_from_gcs(bucket_name, monitoring_filename, local_monitoring_plot_path)
+
+    plot_url = f"/get_image?filename={local_plot_path}"
+    monitoring_url = f"/get_image?filename={local_monitoring_plot_path}"
+
+    return jsonify({
+        'plot_url': plot_url,
+        'monitoring_url': monitoring_url
+    })
 
 @app.route('/get_image', methods=['GET'])
 def get_image():
@@ -335,8 +287,6 @@ def get_image():
         return jsonify({'error': 'Le fichier demandé n\'existe pas.'}), 404
 
     return send_file(filename, mimetype='image/png')
-
-
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))
