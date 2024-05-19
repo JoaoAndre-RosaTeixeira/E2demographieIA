@@ -20,6 +20,7 @@ def get_secret(secret_id, project_id):
     return secret_value
 
 # Exemple d'utilisation
+bucket_name = 'my-flask-app-bucket'  
 project_id = "dev-ia-e1"
 db_url = get_secret('database-url', project_id)
 
@@ -167,7 +168,6 @@ def predict(entity_type):
     series = series.interpolate(method='linear').dropna()  # Supprimer les NaN par interpolation linéaire
 
     # Vérifier si le modèle existe déjà
-    bucket_name = 'my-flask-app-bucket'
     model_filename = f"{entity_type}_{code}_{series.index[-1].year}.pkl"
     local_model_path = f"/tmp/{model_filename}"
     
