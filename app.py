@@ -169,12 +169,12 @@ def predict(entity_type):
 
     # Vérifier si le modèle existe déjà
     model_filename = f"{entity_type}_{code}_{target_year}.pkl"
-    local_model_path = f"/tmp/models{model_filename}"
+    local_model_path = f"models/{model_filename}"
     
     
     bucket = storage.Client().bucket(bucket_name)
     if bucket.blob(model_filename).exists():
-        blob = bucket.blob(model_filename)
+        blob = bucket.blob(local_model_path)
         blob.download_to_filename(local_model_path)
         model = joblib.load(local_model_path)
         print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
@@ -182,7 +182,7 @@ def predict(entity_type):
         # Entraîner et sauvegarder le modèle
         model = get_best_arima_model(series)
         joblib.dump(model, local_model_path)
-        blob = bucket.blob(model_filename)
+        blob = bucket.blob(local_model_path)
         blob.upload_from_filename(local_model_path)
         print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
 
