@@ -173,7 +173,7 @@ def predict(entity_type):
     
     
     bucket = storage.Client().bucket(bucket_name)
-    if bucket.blob(model_filename).exists():
+    if bucket.blob(local_model_path).exists():
         blob = bucket.blob(local_model_path)
         blob.download_to_filename(local_model_path)
         model = joblib.load(local_model_path)
