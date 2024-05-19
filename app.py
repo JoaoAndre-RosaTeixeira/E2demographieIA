@@ -192,7 +192,7 @@ def predict(entity_type):
     local_model_path = f"/tmp/{model_filename}"
     
     bucket = storage.Client().bucket(bucket_name)
-    if bucket.blob(model_filename).exists() and series.index[-1].year <= target_year:
+    if bucket.blob(model_filename).exists():
         download_from_gcs(bucket_name, model_filename, local_model_path)
         model = joblib.load(local_model_path)
         print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
@@ -210,12 +210,14 @@ def predict(entity_type):
     predicted_value = forecast_df['mean'].iloc[-1]
 
     # Sauvegarder le graphique
-    plot_filename = f"/tmp/plots/{entity_type}_{code}_{target_year}.png"
-    plot_monitoring_filename = f"/tmp/plots/monitoring_{entity_type}_{code}_{target_year}.png"
-    plot_population_forecast(series, forecast_df, plot_filename)
-    generate_monitoring_plot(code, entity_type, plot_monitoring_filename)
-    save_to_gcs(bucket_name, plot_filename, f"plots/{entity_type}_{code}_{target_year}.png")
-    save_to_gcs(bucket_name, plot_monitoring_filename, f"plots/monitoring_{entity_type}_{code}_{target_year}.png")
+    plot_filename = f"plots/{entity_type}_{code}_{target_year}.png"
+    local_plot_path = f"/tmp/{plot_filename}"
+    plot_monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{target_year}.png"
+    local_monitoring_plot_path = f"/tmp/{plot_monitoring_filename}"
+    plot_population_forecast(series, forecast_df, local_plot_path)
+    generate_monitoring_plot(code, entity_type, local_monitoring_plot_path)
+    save_to_gcs(bucket_name, local_plot_path, plot_filename)
+    save_to_gcs(bucket_name, local_monitoring_plot_path, plot_monitoring_filename)
 
     # Construction de la réponse
     response = {
@@ -254,19 +256,21 @@ def get_plot(entity_type):
     if not entity:
         return jsonify({'error': f'{entity_type.capitalize()} avec code {code} non trouvé.'}), 404
 
-    plot_filename = f"/tmp/plots/{entity_type}_{code}_{year}.png"
-    monitoring_filename = f"/tmp/plots/monitoring_{entity_type}_{code}_{year}.png"
+    plot_filename = f"plots/{entity_type}_{code}_{year}.png"
+    local_plot_path = f"/tmp/{plot_filename}"
+    monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{year}.png"
+    local_monitoring_plot_path = f"/tmp/{monitoring_filename}"
 
     bucket_name = 'my-flask-app-bucket'
     bucket = storage.Client().bucket(bucket_name)
-    if not bucket.blob(f"plots/{entity_type}_{code}_{year}.png").exists():
+    if not bucket.blob(plot_filename).exists():
         return jsonify({'error': 'Le graphique demandé n\'existe pas.'}), 404
 
-    download_from_gcs(bucket_name, f"plots/{entity_type}_{code}_{year}.png", plot_filename)
-    download_from_gcs(bucket_name, f"plots/monitoring_{entity_type}_{code}_{year}.png", monitoring_filename)
+    download_from_gcs(bucket_name, plot_filename, local_plot_path)
+    download_from_gcs(bucket_name, monitoring_filename, local_monitoring_plot_path)
 
-    plot_url = f"/get_image?filename={plot_filename}"
-    monitoring_url = f"/get_image?filename={monitoring_filename}"
+    plot_url = f"/get_image?filename={local_plot_path}"
+    monitoring_url = f"/get_image?filename={local_monitoring_plot_path}"
 
     return jsonify({
         'plot_url': plot_url,
@@ -277,7 +281,7 @@ def get_plot(entity_type):
 def get_image():
     filename = request.args.get('filename')
 
-    if not filename or not os.path.exists(filename):
+    if not filename:
         return jsonify({'error': 'Le fichier demandé n\'existe pas.'}), 404
 
     return send_file(filename, mimetype='image/png')
