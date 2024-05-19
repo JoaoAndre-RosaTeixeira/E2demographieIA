@@ -1,5 +1,4 @@
 from urllib.parse import quote_plus
-import zipfile
 from flask import Flask, jsonify, request, send_file
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, ForeignKey
@@ -27,8 +26,7 @@ db_url = get_secret('database-url', project_id)
 # Configuration de l'application Flask
 app = Flask(__name__)
 print(db_url)
-database_url = quote_plus(db_url)
-app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialisation de SQLAlchemy avec Flask
