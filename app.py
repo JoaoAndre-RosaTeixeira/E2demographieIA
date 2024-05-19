@@ -1,5 +1,5 @@
 import os
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, send_file, redirect
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
@@ -20,6 +20,7 @@ def get_secret(secret_id, project_id):
     return secret_value
 
 # Exemple d'utilisation
+bucket_name = 'my-flask-app-bucket'  
 project_id = "dev-ia-e1"
 db_url = get_secret('database-url', project_id)
 
@@ -66,33 +67,6 @@ entity_config = {
     'departement': {'model': Departement, 'code_attr': 'code', 'population_relationship': 'communes'},
     'region': {'model': Region, 'code_attr': 'code', 'population_relationship': 'departements'}
 }
-
-def save_to_gcs(bucket_name, source_file_name, destination_blob_name):
-    """Uploads a file to the bucket."""
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(destination_blob_name)
-
-    blob.upload_from_filename(source_file_name)
-    print(f"File {source_file_name} uploaded to {destination_blob_name}.")
-
-def download_from_gcs(bucket_name, source_blob_name, destination_file_name):
-    """Downloads a file from the bucket."""
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(source_blob_name)
-
-    blob.download_to_filename(destination_file_name)
-    print(f"File {source_blob_name} downloaded to {destination_file_name}.")
-
-def make_blob_public(bucket_name, blob_name):
-    """Renders a blob publicly accessible."""
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(blob_name)
-
-    blob.make_public()
-    print(f"Blob {blob_name} is now publicly accessible at {blob.public_url}")
 
 @app.route('/<entity_type>', methods=['GET'])
 def get_data(entity_type):
@@ -194,20 +168,22 @@ def predict(entity_type):
     series = series.interpolate(method='linear').dropna()  # Supprimer les NaN par interpolation linéaire
 
     # Vérifier si le modèle existe déjà
-    bucket_name = 'my-flask-app-bucket'
-    model_filename = f"{entity_type}_{code}_{series.index[-1].year}.pkl"
-    blob_path = f"models/{model_filename}"
+    model_filename = f"models/{entity_type}_{code}_{target_year}.pkl"
+    local_model_path = f"/tmp/{model_filename}"
+    
     
     bucket = storage.Client().bucket(bucket_name)
-    if bucket.blob(blob_path).exists():
-        download_from_gcs(bucket_name, blob_path, model_filename)
-        model = joblib.load(model_filename)
+    if bucket.blob(model_filename).exists():
+        blob = bucket.blob(model_filename)
+        blob.download_to_filename(local_model_path)
+        model = joblib.load(local_model_path)
         print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
     else:
         # Entraîner et sauvegarder le modèle
         model = get_best_arima_model(series)
-        joblib.dump(model, model_filename)
-        save_to_gcs(bucket_name, model_filename, blob_path)
+        joblib.dump(model, local_model_path)
+        blob = bucket.blob(model_filename)
+        blob.upload_from_filename(local_model_path)
         print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
 
     # Prédiction
@@ -218,15 +194,9 @@ def predict(entity_type):
 
     # Sauvegarder le graphique
     plot_filename = f"plots/{entity_type}_{code}_{target_year}.png"
-    plot_blob_name = plot_filename
-    plot_population_forecast(series, forecast_df, bucket_name, plot_blob_name)
+    plot_population_forecast(series, forecast_df, bucket_name, plot_filename)
     plot_monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{target_year}.png"
-    monitoring_blob_name = plot_monitoring_filename
-    generate_monitoring_plot(code, entity_type, bucket_name, monitoring_blob_name)
-
-    # Rendre les blobs publics
-    make_blob_public(bucket_name, plot_blob_name)
-    make_blob_public(bucket_name, monitoring_blob_name)
+    generate_monitoring_plot(code, entity_type, bucket_name, plot_monitoring_filename)
 
     # Construction de la réponse
     response = {
@@ -234,7 +204,7 @@ def predict(entity_type):
         'nom': entity.nom,
         'target_year': target_year,
         'predicted_population': int(predicted_value),
-        'plot_url': f"https://storage.googleapis.com/{bucket_name}/{plot_blob_name}",
+        'plot_url': f"/get_plot/{entity_type}?code={code}&year={target_year}",
     }
 
     if entity_type == 'commune':
@@ -266,17 +236,9 @@ def get_plot(entity_type):
         return jsonify({'error': f'{entity_type.capitalize()} avec code {code} non trouvé.'}), 404
 
     plot_filename = f"plots/{entity_type}_{code}_{year}.png"
-    plot_blob_name = plot_filename
+    plot_url = f"https://storage.googleapis.com/{bucket_name}/{plot_filename}"
     monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{year}.png"
-    monitoring_blob_name = monitoring_filename
-
-    bucket_name = 'my-flask-app-bucket'
-    bucket = storage.Client().bucket(bucket_name)
-    if not bucket.blob(plot_blob_name).exists():
-        return jsonify({'error': 'Le graphique demandé n\'existe pas.'}), 404
-
-    plot_url = f"https://storage.googleapis.com/{bucket_name}/{plot_blob_name}"
-    monitoring_url = f"https://storage.googleapis.com/{bucket_name}/{monitoring_blob_name}"
+    monitoring_url = f"https://storage.googleapis.com/{bucket_name}/{monitoring_filename}"
 
     return jsonify({
         'plot_url': plot_url,
@@ -290,7 +252,7 @@ def get_image():
     if not filename:
         return jsonify({'error': 'Le fichier demandé n\'existe pas.'}), 404
 
-    return send_file(filename, mimetype='image/png')
+    return redirect(filename)
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))
