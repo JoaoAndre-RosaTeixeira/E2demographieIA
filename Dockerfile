@@ -19,7 +19,7 @@ COPY . /app
 EXPOSE 8080 
 
 ENV FLASK_RUN_HOST=0.0.0.0
-ENV PORT 8080  # Utilisation du port 8080
+ENV PORT 8080  
 ENV PATH="/opt/venv/bin:$PATH"
 
-CMD ["flask", "run", "--host=0.0.0.0", "--port=8080"]  # Préciser le port 8080
+CMD ["flask", "run", "--host=0.0.0.0", "--port=8080"] 

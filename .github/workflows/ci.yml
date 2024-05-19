@@ -43,4 +43,4 @@ jobs:
 
     - name: Build and push Docker image
       run: |
-        gcloud builds submit --tag gcr.io/dev-ia-e1/flask-app  # Assurez-vous que le tag ici correspond
+        gcloud builds submit --tag gcr.io/dev-ia-e1/flask-app 

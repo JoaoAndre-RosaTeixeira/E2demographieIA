@@ -1,5 +1,3 @@
-import base64
-import io
 from flask import json
 import joblib
 from pmdarima import auto_arima
@@ -26,6 +24,14 @@ def predict_population(model, start_year, end_year):
     forecast_df = forecast.summary_frame()
     return forecast_df
 
+# def train_and_predict(series, target_year):
+#     model = SARIMAX(series, order=(1, 1, 1), seasonal_order=(0, 0, 0, 0))
+#     results = model.fit(disp=False)
+#     start_year = series.index[-1].year + 1
+#     end_year = target_year
+#     forecast = results.get_forecast(steps=target_year - start_year + 1)
+#     forecast_df = forecast.summary_frame()
+#     return forecast_df
 
 def train_and_evaluate(series, eval_year):
     series = series.interpolate(method='linear').dropna()
@@ -46,40 +52,44 @@ def train_and_evaluate(series, eval_year):
 
     return accuracy, best_order, best_seasonal_order
 
-def plot_population_forecast(series, forecast_df):
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(series, label='Historical Population')
-    ax.plot(forecast_df['mean'], label='Forecasted Population')
+def save_model(model, filename):
+    joblib.dump(model, filename)
+
+def load_model(filename):
+    return joblib.load(filename)
+
+def save_model_info(info, filename):
+    with open(filename, 'w') as f:
+        json.dump(info, f)
+
+def load_model_info(filename):
+    with open(filename, 'r') as f:
+        return json.load(f)
+
+def plot_population_forecast(series, forecast_df, filename):
+    plt.figure(figsize=(10, 5))
+    plt.plot(series, label='Historical Population')
+    plt.plot(forecast_df['mean'], label='Forecasted Population')
     if 'mean_ci_lower' in forecast_df.columns and 'mean_ci_upper' in forecast_df.columns:
-        ax.fill_between(forecast_df.index, forecast_df['mean_ci_lower'], forecast_df['mean_ci_upper'], color='pink', alpha=0.3)
-    ax.set_xlabel('Year')
-    ax.set_ylabel('Population')
-    ax.set_title('Population Forecast')
-    ax.legend()
-    ax.grid(True)
-    
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png')
-    plt.close(fig)
-    buf.seek(0)
-    img_base64 = base64.b64encode(buf.getvalue()).decode('utf-8')
-    return img_base64
+        plt.fill_between(forecast_df.index, forecast_df['mean_ci_lower'], forecast_df['mean_ci_upper'], color='pink', alpha=0.3)
+    plt.xlabel('Year')
+    plt.ylabel('Population')
+    plt.title('Population Forecast')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(filename)
+    plt.close()
     
 
-def generate_monitoring_plot(code, entity_type):
+def generate_monitoring_plot(code, entity_type, monitoring_filename):
     epochs = list(range(1, 11))
     accuracy = [0.8 + 0.01 * i for i in range(10)]
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(epochs, accuracy, marker='o', label='Accuracy')
-    ax.set_xlabel('Epochs')
-    ax.set_ylabel('Accuracy')
-    ax.set_title(f'Monitoring des Performances du Modèle pour {entity_type} {code}')
-    ax.legend()
-    ax.grid(True)
-    
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png')
-    plt.close(fig)
-    buf.seek(0)
-    img_base64 = base64.b64encode(buf.getvalue()).decode('utf-8')
-    return img_base64
+    plt.figure(figsize=(10, 5))
+    plt.plot(epochs, accuracy, marker='o', label='Accuracy')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.title(f'Monitoring des Performances du Modèle pour {entity_type} {code}')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(monitoring_filename)
+    plt.close()
