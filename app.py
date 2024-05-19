@@ -176,12 +176,12 @@ def predict(entity_type):
     if bucket.blob(local_model_path).exists():
         blob = bucket.blob(local_model_path)
         blob.download_to_filename(local_model_path)
-        model = joblib.load(local_model_path)
+        model = joblib.load(model_filename)
         print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
     else:
         # Entraîner et sauvegarder le modèle
         model = get_best_arima_model(series)
-        joblib.dump(model, local_model_path)
+        joblib.dump(model, model_filename)
         blob = bucket.blob(local_model_path)
         blob.upload_from_filename(local_model_path)
         print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
