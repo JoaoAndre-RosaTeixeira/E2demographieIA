@@ -1,8 +1,11 @@
-import io
+import numpy as np
+import pandas as pd
 from pmdarima import auto_arima
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 import matplotlib.pyplot as plt
 from google.cloud import storage
+import joblib
+import io
 
 def get_best_arima_model(series):
     model = auto_arima(series, seasonal=False, trace=True, error_action='ignore', suppress_warnings=True, stepwise=True)
@@ -11,27 +14,11 @@ def get_best_arima_model(series):
     print(f"Meilleure configuration trouvée : ordre={best_order}, ordre saisonnier={best_seasonal_order}")
     return model
 
-def predict_population(model, start_year, end_year):
-    """Génère des prévisions de population à partir d'un modèle ARIMA."""
-    steps = end_year - start_year + 1
-    forecast = model.get_forecast(steps=steps)
-    forecast_df = forecast.summary_frame()
-    return forecast_df
-
-def save_plot_to_gcs(fig, bucket_name, blob_name):
-    """Sauvegarde une figure matplotlib sur GCS."""
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png')
-    buf.seek(0)
-    
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(blob_name)
-    blob.upload_from_file(buf, content_type='image/png')
-    
-    buf.close()
-    plt.close(fig)
-    print(f"File {blob_name} uploaded to {bucket_name}.")
+def calculate_accuracy(series, model):
+    predictions = model.predict(start=0, end=len(series)-1)
+    actual = series.values
+    accuracy = 100 - np.mean(np.abs((actual - predictions) / actual)) * 100
+    return accuracy
 
 def plot_population_forecast(series, forecast_df, bucket_name, blob_name):
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -47,11 +34,24 @@ def plot_population_forecast(series, forecast_df, bucket_name, blob_name):
     
     save_plot_to_gcs(fig, bucket_name, blob_name)
 
-def generate_monitoring_plot(code, entity_type, bucket_name, blob_name):
-    epochs = list(range(1, 11))
-    accuracy = [0.8 + 0.01 * i for i in range(10)]
+def save_plot_to_gcs(fig, bucket_name, blob_name):
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png')
+    buf.seek(0)
+    
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    blob.upload_from_file(buf, content_type='image/png')
+    
+    buf.close()
+    plt.close(fig)
+    print(f"File {blob_name} uploaded to {bucket_name}.")
+
+def generate_monitoring_plot(code, entity_type, accuracies, bucket_name, blob_name):
+    epochs = list(range(1, len(accuracies) + 1))
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(epochs, accuracy, marker='o', label='Accuracy')
+    ax.plot(epochs, accuracies, marker='o', label='Accuracy')
     ax.set_xlabel('Epochs')
     ax.set_ylabel('Accuracy')
     ax.set_title(f'Monitoring des Performances du Modèle pour {entity_type} {code}')

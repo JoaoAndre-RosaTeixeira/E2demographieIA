@@ -3,7 +3,7 @@ from flask import Flask, jsonify, request, redirect
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
-from model import plot_population_forecast, generate_monitoring_plot, get_best_arima_model
+from model import calculate_accuracy, plot_population_forecast, generate_monitoring_plot, get_best_arima_model
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
@@ -207,11 +207,17 @@ def predict(entity_type):
     forecast_df = pd.DataFrame(forecast_df, index=forecast_index, columns=['mean'])
     predicted_value = forecast_df['mean'].iloc[-1]
 
+    # Calcul de l'accuracy
+    accuracy = calculate_accuracy(series, model)
+
     # Sauvegarder le graphique
     plot_filename = f"plots/{entity_type}_{code}_{target_year}.png"
     plot_population_forecast(series, forecast_df, bucket_name, plot_filename)
     plot_monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{target_year}.png"
-    generate_monitoring_plot(code, entity_type, bucket_name, plot_monitoring_filename)
+    generate_monitoring_plot(code, entity_type, [accuracy], bucket_name, plot_monitoring_filename)
+
+    plot_url = f"https://storage.googleapis.com/{bucket_name}/{plot_filename}"
+    monitoring_url = f"https://storage.googleapis.com/{bucket_name}/{plot_monitoring_filename}"
 
     # Construction de la réponse
     response = {
@@ -219,7 +225,8 @@ def predict(entity_type):
         'nom': entity.nom,
         'target_year': target_year,
         'predicted_population': int(predicted_value),
-        'plot_url': f"/get_plot/{entity_type}?code={code}&year={target_year}",
+        'plot_url': plot_url,
+        'monitoring_url': monitoring_url
     }
 
     if entity_type == 'commune':
@@ -227,38 +234,6 @@ def predict(entity_type):
 
     return jsonify(response)
 
-@app.route('/get_plot/<entity_type>', methods=['GET'])
-def get_plot(entity_type):
-    code = request.args.get('code')
-    year = request.args.get('year')
-
-    if not code or not year:
-        return jsonify({'error': 'Veuillez fournir les paramètres "code" et "year".'}), 400
-
-    try:
-        year = int(year)
-    except ValueError:
-        return jsonify({'error': 'L\'année doit être un entier.'}), 400
-
-    config = entity_config.get(entity_type)
-    if not config:
-        return jsonify(message="Invalid entity type"), 400
-
-    model = config['model']
-    
-    entity = db.session.query(model).filter(getattr(model, config['code_attr']) == code).first()
-    if not entity:
-        return jsonify({'error': f'{entity_type.capitalize()} avec code {code} non trouvé.'}), 404
-
-    plot_filename = f"plots/{entity_type}_{code}_{year}.png"
-    plot_url = f"https://storage.googleapis.com/{bucket_name}/{plot_filename}"
-    monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{year}.png"
-    monitoring_url = f"https://storage.googleapis.com/{bucket_name}/{monitoring_filename}"
-
-    return jsonify({
-        'plot_url': plot_url,
-        'monitoring_url': monitoring_url
-    })
 
 @app.route('/get_image', methods=['GET'])
 def get_image():
