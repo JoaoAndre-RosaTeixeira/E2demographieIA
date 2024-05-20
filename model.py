@@ -15,10 +15,17 @@ def get_best_arima_model(series):
     return model
 
 def calculate_accuracy(series, model):
+    if len(series) == 0:
+        return 0 
     predictions = model.predict(start=0, end=len(series)-1)
     actual = series.values
+    if len(predictions) != len(actual):
+        min_len = min(len(predictions), len(actual))
+        predictions = predictions[:min_len]
+        actual = actual[:min_len]
     accuracy = 100 - np.mean(np.abs((actual - predictions) / actual)) * 100
     return accuracy
+
 
 def plot_population_forecast(series, forecast_df, bucket_name, blob_name):
     fig, ax = plt.subplots(figsize=(10, 5))
