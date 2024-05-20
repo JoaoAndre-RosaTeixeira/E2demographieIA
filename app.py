@@ -7,6 +7,8 @@ from model import calculate_accuracy, plot_population_forecast, generate_monitor
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
+import logging
+from prometheus_flask_exporter import PrometheusMetrics
 
 from google.cloud import secretmanager, storage
 import joblib
@@ -31,6 +33,22 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialisation de SQLAlchemy avec Flask
 db = SQLAlchemy(app)
+
+# Initialisation de Prometheus Metrics
+metrics = PrometheusMetrics(app)
+
+# Configurer les logs
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('flask_app')
+
+@app.before_request
+def before_request():
+    logger.info("Request received: %s %s", request.method, request.path)
+
+@app.after_request
+def after_request(response):
+    logger.info("Response sent: %s", response.status)
+    return response
 
 # Définition des modèles
 class Commune(db.Model):
@@ -138,7 +156,14 @@ def get_data(entity_type):
         
     return jsonify(response)
 
+# Example de métrique personnalisée pour suivre les prédictions
+prediction_counter = metrics.counter(
+    'predictions_total', 'Nombre total de prédictions',
+    labels={'entity_type': lambda: request.view_args['entity_type']}
+)
+
 @app.route('/predict/<entity_type>', methods=['GET'])
+@prediction_counter
 def predict(entity_type):
     code = request.args.get('code')
     target_year = request.args.get('year')
@@ -224,6 +249,7 @@ def predict(entity_type):
         'code': entity.code,
         'nom': entity.nom,
         'target_year': target_year,
+        'accuracy' : accuracy,
         'predicted_population': int(predicted_value),
         'plot_url': plot_url,
         'monitoring_url': monitoring_url
@@ -233,7 +259,6 @@ def predict(entity_type):
         response['codes_postaux'] = entity.codes_postaux
 
     return jsonify(response)
-
 
 @app.route('/get_image', methods=['GET'])
 def get_image():

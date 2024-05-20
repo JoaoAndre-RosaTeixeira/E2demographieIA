@@ -26,7 +26,6 @@ def calculate_accuracy(series, model):
     accuracy = 100 - np.mean(np.abs((actual - predictions) / actual)) * 100
     return accuracy
 
-
 def plot_population_forecast(series, forecast_df, bucket_name, blob_name):
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(series, label='Historical Population')
