@@ -1,0 +1,11 @@
+groups:
+- name: example
+  rules:
+  - alert: HighPredictionLatency
+    expr: request_duration_seconds{path="/predict/<entity_type>"} > 1
+    for: 1m
+    labels:
+      severity: page
+    annotations:
+      summary: "High latency for prediction requests"
+      description: "Prediction requests are taking more than 1 second."
