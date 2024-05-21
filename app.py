@@ -1,6 +1,7 @@
 import os
 from flask import Flask, jsonify, request, redirect
 from flask_sqlalchemy import SQLAlchemy
+from flask_cors import CORS
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
 from model import calculate_accuracy, plot_population_forecast, generate_monitoring_plot, get_best_arima_model
@@ -26,6 +27,8 @@ db_url = get_secret('database-url', project_id)
 
 # Configuration de l'application Flask
 app = Flask(__name__)
+
+CORS(app)  
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
