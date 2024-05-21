@@ -227,6 +227,7 @@ def predict(entity_type):
         'code': entity.code,
         'nom': entity.nom,
         'target_year': target_year,
+        'accuracy' : accuracy,
         'predicted_population': int(predicted_value),
         'plot_url': plot_url,
         'monitoring_url': monitoring_url
