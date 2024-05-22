@@ -4,7 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
-from model import calculate_accuracy, plot_population_forecast, generate_monitoring_plot, get_best_arima_model, save_model_info_to_gcs, load_model_info_from_gcs
+from model import train_and_evaluate, plot_population_forecast, generate_monitoring_plot, get_best_arima_model, save_model_info_to_gcs, load_model_info_from_gcs
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
