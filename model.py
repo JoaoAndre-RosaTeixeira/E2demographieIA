@@ -15,7 +15,8 @@ def calculate_rmse(y_true, y_pred):
 def train_and_evaluate(series, eval_year=None):
     """Train the model and evaluate its performance."""
     # Diviser les données en train et test
-    train, test = series[:eval_year], series[eval_year:]
+    train = series[:eval_year]
+    test = series[eval_year:]
     
     # Entraîner le modèle sur les données d'entraînement
     model = get_best_arima_model(train)
