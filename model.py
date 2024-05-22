@@ -1,30 +1,31 @@
 import numpy as np
 import pandas as pd
 from pmdarima import auto_arima
-from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
 from google.cloud import storage
+import joblib
 import io
 import json
 
 def calculate_rmse(y_true, y_pred):
     """Calculates the Root Mean Squared Error (RMSE)."""
-    return np.sqrt(mean_absolute_error(y_true, y_pred))
+    return np.sqrt(mean_squared_error(y_true, y_pred))
 
 def train_and_evaluate(series, eval_year=None):
     """Train the model and evaluate its performance."""
-    train = series[:eval_year]
-    test = series[eval_year:]
-
+    # Diviser les données en train et test
+    train, test = series[:eval_year], series[eval_year:]
+    
     # Entraîner le modèle sur les données d'entraînement
     model = get_best_arima_model(train)
-
+    
     # Prédire les valeurs sur les données de test
     y_pred = model.predict(n_periods=len(test))
-
+    
     # Calculer l'RMSE
     accuracy = calculate_rmse(test.values, y_pred)
-
+    
     # Retourner l'accuracy et les paramètres du modèle
     return accuracy, model.order, model.seasonal_order
 
@@ -36,10 +37,14 @@ def get_best_arima_model(series):
     return model
 
 def calculate_accuracy(series, model):
-    predictions = model.predict_in_sample()
+    if len(series) == 0:
+        return 0 
+    predictions = model.predict_in_sample(start=0, end=len(series)-1)
     actual = series.values
-
-    # Calculer la précision
+    if len(predictions) != len(actual):
+        min_len = min(len(predictions), len(actual))
+        predictions = predictions[:min_len]
+        actual = actual[:min_len]
     accuracy = 100 - np.mean(np.abs((actual - predictions) / actual)) * 100
     return accuracy
 
@@ -54,19 +59,19 @@ def plot_population_forecast(series, forecast_df, bucket_name, blob_name):
     ax.set_title('Population Forecast')
     ax.legend()
     ax.grid(True)
-
+    
     save_plot_to_gcs(fig, bucket_name, blob_name)
 
 def save_plot_to_gcs(fig, bucket_name, blob_name):
     buf = io.BytesIO()
     fig.savefig(buf, format='png')
     buf.seek(0)
-
+    
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
     blob.upload_from_file(buf, content_type='image/png')
-
+    
     buf.close()
     plt.close(fig)
     print(f"File {blob_name} uploaded to {bucket_name}.")
@@ -80,22 +85,29 @@ def generate_monitoring_plot(code, entity_type, accuracies, bucket_name, blob_na
     ax.set_title(f'Monitoring des Performances du Modèle pour {entity_type} {code}')
     ax.legend()
     ax.grid(True)
-
+    
     save_plot_to_gcs(fig, bucket_name, blob_name)
 
-def save_model_info_to_gcs(info, bucket_name, blob_name):
+def save_model_info_to_gcs(model_info, bucket_name, blob_name):
+    """Save model information to Google Cloud Storage."""
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
-
-    blob.upload_from_string(json.dumps(info), content_type='application/json')
-    print(f"Model info uploaded to {blob_name} in bucket {bucket_name}.")
+    
+    model_info_json = json.dumps(model_info)
+    blob.upload_from_string(model_info_json, content_type='application/json')
+    
+    print(f"Model info saved to {blob_name} in bucket {bucket_name}.")
 
 def load_model_info_from_gcs(bucket_name, blob_name):
+    """Load model information from Google Cloud Storage."""
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
-
-    model_info = json.loads(blob.download_as_string())
-    print(f"Model info downloaded from {blob_name} in bucket {bucket_name}.")
+    
+    model_info_json = blob.download_as_string()
+    model_info = json.loads(model_info_json)
+    
+    print(f"Model info loaded from {blob_name} in bucket {bucket_name}.")
+    
     return model_info

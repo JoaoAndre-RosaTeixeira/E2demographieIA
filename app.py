@@ -21,14 +21,14 @@ def get_secret(secret_id, project_id):
     return secret_value
 
 # Exemple d'utilisation
-bucket_name = 'my-flask-app-bucket'
+bucket_name = 'my-flask-app-bucket'  
 project_id = "dev-ia-e1"
 db_url = get_secret('database-url', project_id)
 
 # Configuration de l'application Flask
 app = Flask(__name__)
 
-CORS(app)
+CORS(app)  
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -88,7 +88,7 @@ def download_from_gcs(bucket_name, source_blob_name, destination_file_name):
 
     blob.download_to_filename(destination_file_name)
     print(f"File {source_blob_name} downloaded to {destination_file_name}.")
-
+    
 @app.route('/train/<entity_type>', methods=['GET'])
 def train(entity_type):
     code = request.args.get('code')
@@ -152,7 +152,7 @@ def train(entity_type):
             'best_seasonal_order': best_seasonal_order
         }, bucket_name, model_info_filename)
         print(f"Modèle sauvegardé sous {model_filename} avec les informations d'évaluation {model_info_filename}.")
-
+    
     response = {
         'code': code,
         'nom': entity.nom,
@@ -165,7 +165,7 @@ def train(entity_type):
         response['codes_postaux'] = entity.codes_postaux
 
     return jsonify(response)
-
+        
 @app.route('/<entity_type>', methods=['GET'])
 def get_data(entity_type):
     code = request.args.get('code', default=None)
@@ -197,7 +197,7 @@ def get_data(entity_type):
                 for departement in entity.departements:
                     for commune in departement.communes:
                         populations.extend(commune.populations)
-
+                        
         population_summary = {}
         for pop in populations:
             if year and pop.annee != year:
@@ -212,26 +212,26 @@ def get_data(entity_type):
         'nom': entity.nom,
         'populations': [{'annee': k, 'population': v} for k, v in sorted(population_summary.items())]
     }
-
+    
     if entity_type == 'commune':
         response['codes_postaux'] = entity.codes_postaux
-
+        
     return jsonify(response)
 
 @app.route('/form/<entity_type>', methods=['GET'])
 def get_entity(entity_type):
     config = entity_config.get(entity_type)
     code = request.args.get('code')
-
+    
     if not config:
         return jsonify(message="Invalid entity type"), 400
 
     model = config['model']
-
+    
     entitys = db.session.query(model).filter(config['entity_code_relationship'] == code).all() if code and model != Region else db.session.query(model).all()
     response = [{'code': entity.code, 'nom': entity.nom} for entity in entitys]
     return jsonify(response)
-
+    
 @app.route('/predict/<entity_type>', methods=['GET'])
 def predict(entity_type):
     code = request.args.get('code')
@@ -280,9 +280,9 @@ def predict(entity_type):
     series = series.interpolate(method='linear').dropna()  # Supprimer les NaN par interpolation linéaire
 
     # Vérifier si le modèle existe déjà
-    model_filename = f"{entity_type}_{code}_{target_year}.pkl"
+    model_filename = f"{entity_type}_{code}_{series.index[-1].year}.pkl"
     blob_path = f"models/{model_filename}"
-    model_info_filename = f"train_models/{entity_type}_{code}_{target_year}_info.json"
+    model_info_filename = f"train_models/{entity_type}_{code}_{series.index[-1].year}_info.json"
 
     bucket = storage.Client().bucket(bucket_name)
     if bucket.blob(blob_path).exists():
@@ -290,9 +290,10 @@ def predict(entity_type):
         model = joblib.load(model_filename)
         model_info = load_model_info_from_gcs(bucket_name, model_info_filename)
         accuracy = model_info['accuracy']
+        best_order = model_info['best_order']
+        best_seasonal_order = model_info['best_seasonal_order']
         print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
     else:
-        # Entraîner et sauvegarder le modèle
         accuracy, best_order, best_seasonal_order = train_and_evaluate(series, eval_year=series.index[-1].year)
         model = get_best_arima_model(series)
         joblib.dump(model, model_filename)
@@ -324,7 +325,7 @@ def predict(entity_type):
         'code': entity.code,
         'nom': entity.nom,
         'target_year': target_year,
-        'accuracy': accuracy,
+        'accuracy' : accuracy,
         'predicted_population': int(predicted_value),
         'plot_url': plot_url,
         'monitoring_url': monitoring_url
