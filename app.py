@@ -151,8 +151,8 @@ def train(entity_type):
             'best_order': best_order,
             'best_seasonal_order': best_seasonal_order
         }, bucket_name, model_info_filename)
-        print(f"Modèle sauvegardé sous {model_filename} avec les informations d'évaluation {model_info_filename}.")
-    
+        print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
+
     response = {
         'code': code,
         'nom': entity.nom,
@@ -280,20 +280,17 @@ def predict(entity_type):
     series = series.interpolate(method='linear').dropna()  # Supprimer les NaN par interpolation linéaire
 
     # Vérifier si le modèle existe déjà
-    model_filename = f"{entity_type}_{code}_{series.index[-1].year}.pkl"
-    blob_path = f"models/{model_filename}"
+    model_filename = f"{entity_type}_{code}_{target_year}.pkl"
     model_info_filename = f"train_models/{entity_type}_{code}_{series.index[-1].year}_info.json"
+    blob_path = f"models/{model_filename}"
 
     bucket = storage.Client().bucket(bucket_name)
     if bucket.blob(blob_path).exists():
         download_from_gcs(bucket_name, blob_path, model_filename)
         model = joblib.load(model_filename)
-        model_info = load_model_info_from_gcs(bucket_name, model_info_filename)
-        accuracy = model_info['accuracy']
-        best_order = model_info['best_order']
-        best_seasonal_order = model_info['best_seasonal_order']
         print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
     else:
+        # Entraîner et sauvegarder le modèle
         accuracy, best_order, best_seasonal_order = train_and_evaluate(series, eval_year=series.index[-1].year)
         model = get_best_arima_model(series)
         joblib.dump(model, model_filename)
@@ -306,14 +303,13 @@ def predict(entity_type):
         print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
 
     # Prédiction
-    n_periods = target_year - series.index[-1].year
-    if n_periods <= 0:
-        return jsonify({'error': 'L\'année cible doit être supérieure à l\'année des données les plus récentes.'}), 400
-
-    forecast_df = model.predict(n_periods=n_periods)
-    forecast_index = pd.date_range(start=series.index[-1] + pd.DateOffset(years=1), periods=n_periods, freq='YS')
+    forecast_df = model.predict(n_periods=target_year - series.index[-1].year)
+    forecast_index = pd.date_range(start=pd.to_datetime(f"{series.index[-1].year + 1}-01-01"), periods=len(forecast_df), freq='YS')
     forecast_df = pd.DataFrame(forecast_df, index=forecast_index, columns=['mean'])
     predicted_value = forecast_df['mean'].iloc[-1]
+
+    # Calcul de l'accuracy
+    accuracy = calculate_accuracy(series, model)
 
     # Sauvegarder le graphique
     plot_filename = f"plots/{entity_type}_{code}_{target_year}.png"
@@ -339,7 +335,6 @@ def predict(entity_type):
         response['codes_postaux'] = entity.codes_postaux
 
     return jsonify(response)
-
 
 
 @app.route('/get_image', methods=['GET'])

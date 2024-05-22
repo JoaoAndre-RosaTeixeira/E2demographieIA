@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from pmdarima import auto_arima
+from statsmodels.tsa.statespace.sarimax import SARIMAX
 from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
 from google.cloud import storage
@@ -15,8 +16,7 @@ def calculate_rmse(y_true, y_pred):
 def train_and_evaluate(series, eval_year=None):
     """Train the model and evaluate its performance."""
     # Diviser les données en train et test
-    train = series[:eval_year]
-    test = series[eval_year:]
+    train, test = series[:str(eval_year)], series[str(eval_year):]
     
     # Entraîner le modèle sur les données d'entraînement
     model = get_best_arima_model(train)
@@ -40,7 +40,7 @@ def get_best_arima_model(series):
 def calculate_accuracy(series, model):
     if len(series) == 0:
         return 0 
-    predictions = model.predict_in_sample(start=0, end=len(series)-1)
+    predictions = model.predict_in_sample()
     actual = series.values
     if len(predictions) != len(actual):
         min_len = min(len(predictions), len(actual))
@@ -90,25 +90,20 @@ def generate_monitoring_plot(code, entity_type, accuracies, bucket_name, blob_na
     save_plot_to_gcs(fig, bucket_name, blob_name)
 
 def save_model_info_to_gcs(model_info, bucket_name, blob_name):
-    """Save model information to Google Cloud Storage."""
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
-    
+
     model_info_json = json.dumps(model_info)
     blob.upload_from_string(model_info_json, content_type='application/json')
-    
-    print(f"Model info saved to {blob_name} in bucket {bucket_name}.")
+    print(f"Model info uploaded to {blob_name}.")
 
 def load_model_info_from_gcs(bucket_name, blob_name):
-    """Load model information from Google Cloud Storage."""
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
-    
+
     model_info_json = blob.download_as_string()
     model_info = json.loads(model_info_json)
-    
-    print(f"Model info loaded from {blob_name} in bucket {bucket_name}.")
-    
+    print(f"Model info loaded from {blob_name}.")
     return model_info
