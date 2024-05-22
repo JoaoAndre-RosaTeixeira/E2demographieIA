@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from pmdarima import auto_arima
+from statsmodels.tsa.statespace.sarimax import SARIMAX
 from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
 from google.cloud import storage
@@ -37,7 +38,9 @@ def get_best_arima_model(series):
     return model
 
 def calculate_accuracy(series, model):
-    predictions = model.predict_in_sample()
+    if len(series) == 0:
+        return 0 
+    predictions = model.predict(start=0, end=len(series)-1)
     actual = series.values
     if len(predictions) != len(actual):
         min_len = min(len(predictions), len(actual))
@@ -45,17 +48,6 @@ def calculate_accuracy(series, model):
         actual = actual[:min_len]
     accuracy = 100 - np.mean(np.abs((actual - predictions) / actual)) * 100
     return accuracy
-
-def save_model_info(model_info, filename):
-    with open(filename, 'w') as f:
-        json.dump(model_info, f)
-    print(f"Model info saved to {filename}.")
-
-def load_model_info(filename):
-    with open(filename, 'r') as f:
-        model_info = json.load(f)
-    print(f"Model info loaded from {filename}.")
-    return model_info
 
 def plot_population_forecast(series, forecast_df, bucket_name, blob_name):
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -96,3 +88,22 @@ def generate_monitoring_plot(code, entity_type, accuracies, bucket_name, blob_na
     ax.grid(True)
     
     save_plot_to_gcs(fig, bucket_name, blob_name)
+
+def save_model_info_to_gcs(info, bucket_name, blob_name):
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    
+    info_json = json.dumps(info)
+    blob.upload_from_string(info_json, content_type='application/json')
+    print(f"Model info uploaded to {blob_name} in bucket {bucket_name}.")
+
+def load_model_info_from_gcs(bucket_name, blob_name):
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    
+    info_json = blob.download_as_text()
+    info = json.loads(info_json)
+    print(f"Model info downloaded from {blob_name} in bucket {bucket_name}.")
+    return info
