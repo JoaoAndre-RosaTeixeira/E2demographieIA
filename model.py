@@ -1,69 +1,44 @@
 import numpy as np
 import pandas as pd
 from pmdarima import auto_arima
-from sklearn.metrics import mean_squared_error, mean_absolute_percentage_error
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 import matplotlib.pyplot as plt
 from google.cloud import storage
 import joblib
 import io
-import json
-
-def save_to_gcs(bucket_name, source_file_name, destination_blob_name):
-    """Uploads a file to the bucket."""
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(destination_blob_name)
-
-    blob.upload_from_filename(source_file_name)
-    print(f"File {source_file_name} uploaded to {destination_blob_name}.")
-
-def download_from_gcs(bucket_name, source_blob_name, destination_file_name):
-    """Downloads a file from the bucket."""
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(source_blob_name)
-
-    blob.download_to_filename(destination_file_name)
-    print(f"File {source_blob_name} downloaded to {destination_file_name}.")
 
 def calculate_rmse(y_true, y_pred):
     """Calculates the Root Mean Squared Error (RMSE)."""
     return np.sqrt(mean_squared_error(y_true, y_pred))
 
-def perform_cross_validation(series, n_splits=5):
-    """Performs cross-validation and returns the accuracy for each split."""
-    from sklearn.model_selection import TimeSeriesSplit
+def calculate_mae(y_true, y_pred):
+    """Calculates the Mean Absolute Error (MAE)."""
+    return mean_absolute_error(y_true, y_pred)
+
+def train_and_evaluate(series, eval_year=None):
+    """Train the model and evaluate its performance."""
+    # Split data into train and test
+    train, test = series[:eval_year], series[eval_year:]
     
-    tscv = TimeSeriesSplit(n_splits=n_splits)
-    accuracies = []
-
-    for train_index, test_index in tscv.split(series):
-        train, test = series.iloc[train_index], series.iloc[test_index]
-        model = get_best_arima_model(train)
-        y_pred = model.predict(n_periods=len(test))
-        accuracy = calculate_rmse(test.values, y_pred)
-        accuracies.append(accuracy)
-
-    return accuracies
+    # Train the model on the training data
+    model = get_best_arima_model(train)
+    
+    # Predict the values on the test data
+    y_pred = model.predict(n_periods=len(test))
+    
+    # Calculate RMSE and MAE
+    rmse = calculate_rmse(test.values, y_pred)
+    mae = calculate_mae(test.values, y_pred)
+    
+    # Return RMSE, MAE, and model parameters
+    return rmse, mae, model.order, model.seasonal_order
 
 def get_best_arima_model(series):
     model = auto_arima(series, seasonal=False, trace=True, error_action='ignore', suppress_warnings=True, stepwise=True)
     best_order = model.order
     best_seasonal_order = model.seasonal_order
-    print(f"Meilleure configuration trouvée : ordre={best_order}, ordre saisonnier={best_seasonal_order}")
+    print(f"Best configuration found: order={best_order}, seasonal_order={best_seasonal_order}")
     return model
-
-def calculate_accuracy(series, model):
-    if len(series) == 0:
-        return 0 
-    predictions = model.predict(start=0, end=len(series)-1)
-    actual = series.values
-    if len(predictions) != len(actual):
-        min_len = min(len(predictions), len(actual))
-        predictions = predictions[:min_len]
-        actual = actual[:min_len]
-    accuracy = 100 - np.mean(np.abs((actual - predictions) / actual)) * 100
-    return accuracy
 
 def plot_population_forecast(series, forecast_df, bucket_name, blob_name):
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -74,18 +49,6 @@ def plot_population_forecast(series, forecast_df, bucket_name, blob_name):
     ax.set_xlabel('Year')
     ax.set_ylabel('Population')
     ax.set_title('Population Forecast')
-    ax.legend()
-    ax.grid(True)
-    
-    save_plot_to_gcs(fig, bucket_name, blob_name)
-
-def generate_monitoring_plot(code, entity_type, accuracies, bucket_name, blob_name):
-    epochs = list(range(1, len(accuracies) + 1))
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(epochs, accuracies, marker='o', label='Accuracy')
-    ax.set_xlabel('Epochs')
-    ax.set_ylabel('Accuracy')
-    ax.set_title(f'Monitoring des Performances du Modèle pour {entity_type} {code}')
     ax.legend()
     ax.grid(True)
     
@@ -104,3 +67,16 @@ def save_plot_to_gcs(fig, bucket_name, blob_name):
     buf.close()
     plt.close(fig)
     print(f"File {blob_name} uploaded to {bucket_name}.")
+
+def generate_monitoring_plot(code, entity_type, rmse_values, mae_values, bucket_name, blob_name):
+    epochs = list(range(1, len(rmse_values) + 1))
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(epochs, rmse_values, marker='o', label='RMSE')
+    ax.plot(epochs, mae_values, marker='o', label='MAE')
+    ax.set_xlabel('Epochs')
+    ax.set_ylabel('Error')
+    ax.set_title(f'Monitoring des Performances du Modèle pour {entity_type} {code}')
+    ax.legend()
+    ax.grid(True)
+    
+    save_plot_to_gcs(fig, bucket_name, blob_name)

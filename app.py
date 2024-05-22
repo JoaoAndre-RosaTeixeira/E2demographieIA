@@ -4,7 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
-from model import download_from_gcs, perform_cross_validation, plot_population_forecast, generate_monitoring_plot, get_best_arima_model, save_to_gcs 
+from model import calculate_rmse, calculate_mae, plot_population_forecast, generate_monitoring_plot, get_best_arima_model, train_and_evaluate
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
@@ -71,7 +71,24 @@ entity_config = {
     'region': {'model': Region, 'code_attr': 'code', 'population_relationship': 'departements', 'entity_code_relationship': Region.code}
 }
 
-        
+def save_to_gcs(bucket_name, source_file_name, destination_blob_name):
+    """Uploads a file to the bucket."""
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(destination_blob_name)
+
+    blob.upload_from_filename(source_file_name)
+    print(f"File {source_file_name} uploaded to {destination_blob_name}.")
+
+def download_from_gcs(bucket_name, source_blob_name, destination_file_name):
+    """Downloads a file from the bucket."""
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(source_blob_name)
+
+    blob.download_to_filename(destination_file_name)
+    print(f"File {source_blob_name} downloaded to {destination_file_name}.")
+
 @app.route('/<entity_type>', methods=['GET'])
 def get_data(entity_type):
     code = request.args.get('code', default=None)
@@ -207,14 +224,15 @@ def predict(entity_type):
     forecast_df = pd.DataFrame(forecast_df, index=forecast_index, columns=['mean'])
     predicted_value = forecast_df['mean'].iloc[-1]
 
-    # Calcul de l'accuracy avec validation croisée
-    cross_val_accuracy = perform_cross_validation(series)
+    # Calcul de l'accuracy
+    rmse, mae, _, _ = train_and_evaluate(series, eval_year=series.index[-1].year)
+    accuracies = [rmse, mae]
 
     # Sauvegarder le graphique
     plot_filename = f"plots/{entity_type}_{code}_{target_year}.png"
     plot_population_forecast(series, forecast_df, bucket_name, plot_filename)
     plot_monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{target_year}.png"
-    generate_monitoring_plot(code, entity_type, cross_val_accuracy, bucket_name, plot_monitoring_filename)
+    generate_monitoring_plot(code, entity_type, [rmse], [mae], bucket_name, plot_monitoring_filename)
 
     plot_url = f"https://storage.googleapis.com/{bucket_name}/{plot_filename}"
     monitoring_url = f"https://storage.googleapis.com/{bucket_name}/{plot_monitoring_filename}"
@@ -224,7 +242,9 @@ def predict(entity_type):
         'code': entity.code,
         'nom': entity.nom,
         'target_year': target_year,
-        'accuracy' : cross_val_accuracy[-1] if cross_val_accuracy else None,
+        'accuracies': accuracies,
+        'rmse': rmse,
+        'mae': mae,
         'predicted_population': int(predicted_value),
         'plot_url': plot_url,
         'monitoring_url': monitoring_url
