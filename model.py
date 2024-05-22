@@ -1,11 +1,33 @@
 import numpy as np
 import pandas as pd
 from pmdarima import auto_arima
-from statsmodels.tsa.statespace.sarimax import SARIMAX
+from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
 from google.cloud import storage
 import joblib
+import json
 import io
+
+def calculate_rmse(y_true, y_pred):
+    """Calculates the Root Mean Squared Error (RMSE)."""
+    return np.sqrt(mean_squared_error(y_true, y_pred))
+
+def train_and_evaluate(series, eval_year=None):
+    """Train the model and evaluate its performance."""
+    # Diviser les données en train et test
+    train, test = series[:eval_year], series[eval_year:]
+    
+    # Entraîner le modèle sur les données d'entraînement
+    model = get_best_arima_model(train)
+    
+    # Prédire les valeurs sur les données de test
+    y_pred = model.predict(n_periods=len(test))
+    
+    # Calculer l'RMSE
+    accuracy = calculate_rmse(test.values, y_pred)
+    
+    # Retourner l'accuracy et les paramètres du modèle
+    return accuracy, model.order, model.seasonal_order
 
 def get_best_arima_model(series):
     model = auto_arima(series, seasonal=False, trace=True, error_action='ignore', suppress_warnings=True, stepwise=True)
@@ -15,9 +37,7 @@ def get_best_arima_model(series):
     return model
 
 def calculate_accuracy(series, model):
-    if len(series) == 0:
-        return 0 
-    predictions = model.predict(start=0, end=len(series)-1)
+    predictions = model.predict_in_sample()
     actual = series.values
     if len(predictions) != len(actual):
         min_len = min(len(predictions), len(actual))
@@ -26,6 +46,16 @@ def calculate_accuracy(series, model):
     accuracy = 100 - np.mean(np.abs((actual - predictions) / actual)) * 100
     return accuracy
 
+def save_model_info(model_info, filename):
+    with open(filename, 'w') as f:
+        json.dump(model_info, f)
+    print(f"Model info saved to {filename}.")
+
+def load_model_info(filename):
+    with open(filename, 'r') as f:
+        model_info = json.load(f)
+    print(f"Model info loaded from {filename}.")
+    return model_info
 
 def plot_population_forecast(series, forecast_df, bucket_name, blob_name):
     fig, ax = plt.subplots(figsize=(10, 5))

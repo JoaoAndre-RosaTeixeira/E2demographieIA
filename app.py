@@ -4,7 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
-from model import calculate_accuracy, plot_population_forecast, generate_monitoring_plot, get_best_arima_model
+from model import calculate_accuracy, plot_population_forecast, generate_monitoring_plot, get_best_arima_model, save_model_info, load_model_info, train_and_evaluate
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
@@ -88,6 +88,82 @@ def download_from_gcs(bucket_name, source_blob_name, destination_file_name):
 
     blob.download_to_filename(destination_file_name)
     print(f"File {source_blob_name} downloaded to {destination_file_name}.")
+    
+@app.route('/train/<entity_type>', methods=['GET'])
+def train(entity_type):
+    code = request.args.get('code')
+
+    if not code:
+        return jsonify({'error': 'Veuillez fournir le paramètre "code".'}), 400
+
+    config = entity_config.get(entity_type)
+    if not config:
+        return jsonify(message="Invalid entity type"), 400
+
+    model = config['model']
+    entity = db.session.query(model).filter(getattr(model, config['code_attr']) == code).first()
+    if not entity:
+        return jsonify({'error': f'{entity_type.capitalize()} avec code {code} non trouvé.'}), 404
+
+    populations = []
+    if entity_type == 'commune':
+        populations = entity.populations
+    elif entity_type == 'departement':
+        for commune in entity.communes:
+            populations.extend(commune.populations)
+    elif entity_type == 'region':
+        for departement in entity.departements:
+            for commune in departement.communes:
+                populations.extend(commune.populations)
+
+    if not populations:
+        return jsonify({'error': f'Aucune donnée de population trouvée pour ce {entity_type}.'}), 404
+
+    population_summary = {}
+    for pop in populations:
+        if pop.annee in population_summary:
+            population_summary[pop.annee] += pop.population
+        else:
+            population_summary[pop.annee] = pop.population
+
+    series = pd.Series(data=list(population_summary.values()), index=pd.to_datetime(list(population_summary.keys()), format='%Y')).asfreq('YS')
+    series = series.interpolate(method='linear').dropna()
+
+    eval_year = series.index[-1].year
+
+    model_filename = f"{entity_type}_{code}_{eval_year}.pkl"
+    model_info_filename = f"train_models/{entity_type}_{code}_{eval_year}_info.json"
+
+    if os.path.exists(os.path.join('train_models', model_filename)) and os.path.exists(model_info_filename) and series.index[-1].year <= eval_year:
+        model = joblib.load(f"train_models/{model_filename}")
+        model_info = load_model_info(model_info_filename)
+        accuracy = model_info['accuracy']
+        best_order = model_info['best_order']
+        best_seasonal_order = model_info['best_seasonal_order']
+        print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
+    else:
+        accuracy, best_order, best_seasonal_order = train_and_evaluate(series, eval_year=eval_year)
+        model = get_best_arima_model(series)
+        joblib.dump(model, f"train_models/{model_filename}")
+        save_model_info({
+            'accuracy': accuracy,
+            'best_order': best_order,
+            'best_seasonal_order': best_seasonal_order
+        }, model_info_filename)
+        print(f"Modèle sauvegardé sous {model_filename} avec les informations d'évaluation {model_info_filename}.")
+    
+    response = {
+        'code': code,
+        'nom': entity.nom,
+        'accuracy': accuracy,
+        'best_order': best_order,
+        'best_seasonal_order': best_seasonal_order
+    }
+
+    if entity_type == 'commune':
+        response['codes_postaux'] = entity.codes_postaux
+
+    return jsonify(response)
         
 @app.route('/<entity_type>', methods=['GET'])
 def get_data(entity_type):
@@ -155,8 +231,6 @@ def get_entity(entity_type):
     response = [{'code': entity.code, 'nom': entity.nom} for entity in entitys]
     return jsonify(response)
     
-    
-
 @app.route('/predict/<entity_type>', methods=['GET'])
 def predict(entity_type):
     code = request.args.get('code')
@@ -214,10 +288,15 @@ def predict(entity_type):
         model = joblib.load(model_filename)
         print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
     else:
-        # Entraîner et sauvegarder le modèle
+        accuracy, best_order, best_seasonal_order = train_and_evaluate(series, eval_year=target_year)
         model = get_best_arima_model(series)
         joblib.dump(model, model_filename)
         save_to_gcs(bucket_name, model_filename, blob_path)
+        save_model_info({
+            'accuracy': accuracy,
+            'best_order': best_order,
+            'best_seasonal_order': best_seasonal_order
+        }, f"train_models/{entity_type}_{code}_{target_year}_info.json")
         print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
 
     # Prédiction
