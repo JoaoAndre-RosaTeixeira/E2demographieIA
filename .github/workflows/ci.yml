@@ -26,6 +26,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    # Uncomment if you have tests to run
     # - name: Run tests
     #   env:
     #     PYTHONPATH: ${{ github.workspace }}
@@ -43,4 +44,4 @@ jobs:
 
     - name: Build and push Docker image
       run: |
-        gcloud builds submit --tag gcr.io/dev-ia-e1/flask-app 
+        gcloud builds submit --tag eu.gcr.io/dev-ia-e1/flask-app:$GITHUB_SHA

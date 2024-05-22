@@ -1,0 +1,7 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'europe-west1-docker.pkg.dev/dev-ia-e1/cloud-run-source-deploy/e2demographieia/flask-app:$COMMIT_SHA', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'europe-west1-docker.pkg.dev/dev-ia-e1/cloud-run-source-deploy/e2demographieia/flask-app:$COMMIT_SHA']
+images:
+  - 'europe-west1-docker.pkg.dev/dev-ia-e1/cloud-run-source-deploy/e2demographieia/flask-app:$COMMIT_SHA'
