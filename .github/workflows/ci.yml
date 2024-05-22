@@ -44,3 +44,12 @@ jobs:
     - name: Build and push Docker image
       run: |
         gcloud builds submit --tag gcr.io/dev-ia-e1/flask-app --region=europe-west1
+
+    - name: Deploy to Cloud Run
+      run: |
+        gcloud run deploy flask-app \
+          --image gcr.io/dev-ia-e1/flask-app \
+          --region europe-west1 \
+          --platform managed \
+          --allow-unauthenticated \
+          --project dev-ia-e1
