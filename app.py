@@ -66,9 +66,9 @@ class PopulationParAnnee(db.Model):
 
 # Configuration des entités avec leurs attributs correspondants
 entity_config = {
-    'commune': {'model': Commune, 'code_attr': 'code', 'population_relationship': 'populations'},
-    'departement': {'model': Departement, 'code_attr': 'code', 'population_relationship': 'communes'},
-    'region': {'model': Region, 'code_attr': 'code', 'population_relationship': 'departements'}
+    'commune': {'model': Commune, 'code_attr': 'code', 'population_relationship': 'populations', 'entity_code_relationship': Commune.code_departement},
+    'departement': {'model': Departement, 'code_attr': 'code', 'population_relationship': 'communes', 'entity_code_relationship': Departement.code_region},
+    'region': {'model': Region, 'code_attr': 'code', 'population_relationship': 'departements', 'entity_code_relationship': Region.code}
 }
 
 def save_to_gcs(bucket_name, source_file_name, destination_blob_name):
@@ -140,6 +140,22 @@ def get_data(entity_type):
         response['codes_postaux'] = entity.codes_postaux
         
     return jsonify(response)
+
+@app.route('/form/<entity_type>', methods=['GET'])
+def get_entity(entity_type):
+    config = entity_config.get(entity_type)
+    code = request.args.get('code')
+    
+    if not config:
+        return jsonify(message="Invalid entity type"), 400
+
+    model = config['model']
+    
+    entitys = db.session.query(model).filter(config['entity_code_relationship'] == code).all() if code and model != Region else db.session.query(model).all()
+    response = [{'code': entity.code, 'nom': entity.nom} for entity in entitys]
+    return jsonify(response)
+    
+    
 
 @app.route('/predict/<entity_type>', methods=['GET'])
 def predict(entity_type):
