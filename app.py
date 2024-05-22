@@ -4,7 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
-from model import train_and_evaluate, plot_population_forecast, generate_monitoring_plot, get_best_arima_model, save_model_info_to_gcs, load_model_info_from_gcs
+from model import calculate_accuracy, plot_population_forecast, generate_monitoring_plot, get_best_arima_model, train_and_evaluate, save_model_info_to_gcs, load_model_info_from_gcs
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
@@ -21,14 +21,14 @@ def get_secret(secret_id, project_id):
     return secret_value
 
 # Exemple d'utilisation
-bucket_name = 'my-flask-app-bucket'  
+bucket_name = 'my-flask-app-bucket'
 project_id = "dev-ia-e1"
 db_url = get_secret('database-url', project_id)
 
 # Configuration de l'application Flask
 app = Flask(__name__)
 
-CORS(app)  
+CORS(app)
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -131,17 +131,12 @@ def train(entity_type):
 
     eval_year = series.index[-1].year
 
-    model_filename = f"train_models/{entity_type}_{code}_{eval_year}.pkl"
+    model_filename = f"{entity_type}_{code}_{eval_year}.pkl"
     model_info_filename = f"train_models/{entity_type}_{code}_{eval_year}_info.json"
-    model_blob_path = f"models/{model_filename}"
-    model_info_blob_path = f"models/{model_info_filename}"
 
-    bucket = storage.Client().bucket(bucket_name)
-    if bucket.blob(model_blob_path).exists() and bucket.blob(model_info_blob_path).exists():
-        download_from_gcs(bucket_name, model_blob_path, model_filename)
-        download_from_gcs(bucket_name, model_info_blob_path, model_info_filename)
-        model = joblib.load(model_filename)
-        model_info = load_model_info_from_gcs(bucket_name, model_info_blob_path)
+    if os.path.exists(os.path.join('train_models', model_filename)) and os.path.exists(model_info_filename) and series.index[-1].year <= eval_year:
+        model = joblib.load(f"train_models/{model_filename}")
+        model_info = load_model_info_from_gcs(bucket_name, model_info_filename)
         accuracy = model_info['accuracy']
         best_order = model_info['best_order']
         best_seasonal_order = model_info['best_seasonal_order']
@@ -149,15 +144,15 @@ def train(entity_type):
     else:
         accuracy, best_order, best_seasonal_order = train_and_evaluate(series, eval_year=eval_year)
         model = get_best_arima_model(series)
-        joblib.dump(model, model_filename)
-        save_to_gcs(bucket_name, model_filename, model_blob_path)
+        joblib.dump(model, f"train_models/{model_filename}")
+        save_to_gcs(bucket_name, f"train_models/{model_filename}", model_filename)
         save_model_info_to_gcs({
             'accuracy': accuracy,
             'best_order': best_order,
             'best_seasonal_order': best_seasonal_order
-        }, bucket_name, model_info_blob_path)
+        }, bucket_name, model_info_filename)
         print(f"Modèle sauvegardé sous {model_filename} avec les informations d'évaluation {model_info_filename}.")
-    
+
     response = {
         'code': code,
         'nom': entity.nom,
@@ -202,7 +197,7 @@ def get_data(entity_type):
                 for departement in entity.departements:
                     for commune in departement.communes:
                         populations.extend(commune.populations)
-                        
+
         population_summary = {}
         for pop in populations:
             if year and pop.annee != year:
@@ -217,22 +212,22 @@ def get_data(entity_type):
         'nom': entity.nom,
         'populations': [{'annee': k, 'population': v} for k, v in sorted(population_summary.items())]
     }
-    
+
     if entity_type == 'commune':
         response['codes_postaux'] = entity.codes_postaux
-        
+
     return jsonify(response)
 
 @app.route('/form/<entity_type>', methods=['GET'])
 def get_entity(entity_type):
     config = entity_config.get(entity_type)
     code = request.args.get('code')
-    
+
     if not config:
         return jsonify(message="Invalid entity type"), 400
 
     model = config['model']
-    
+
     entitys = db.session.query(model).filter(config['entity_code_relationship'] == code).all() if code and model != Region else db.session.query(model).all()
     response = [{'code': entity.code, 'nom': entity.nom} for entity in entitys]
     return jsonify(response)
@@ -285,26 +280,28 @@ def predict(entity_type):
     series = series.interpolate(method='linear').dropna()  # Supprimer les NaN par interpolation linéaire
 
     # Vérifier si le modèle existe déjà
-    model_filename = f"{entity_type}_{code}_{series.index[-1].year}.pkl"
-    model_info_filename = f"{entity_type}_{code}_{series.index[-1].year}_info.json"
-    model_blob_path = f"models/{model_filename}"
-    model_info_blob_path = f"models/{model_info_filename}"
+    model_filename = f"{entity_type}_{code}_{target_year}.pkl"
+    blob_path = f"models/{model_filename}"
+    model_info_filename = f"train_models/{entity_type}_{code}_{target_year}_info.json"
 
     bucket = storage.Client().bucket(bucket_name)
-    if bucket.blob(model_blob_path).exists() and bucket.blob(model_info_blob_path).exists():
-        download_from_gcs(bucket_name, model_blob_path, model_filename)
+    if bucket.blob(blob_path).exists():
+        download_from_gcs(bucket_name, blob_path, model_filename)
         model = joblib.load(model_filename)
+        model_info = load_model_info_from_gcs(bucket_name, model_info_filename)
+        accuracy = model_info['accuracy']
         print(f"Chargement du modèle existant pour {entity_type} avec code {code}.")
     else:
+        # Entraîner et sauvegarder le modèle
         accuracy, best_order, best_seasonal_order = train_and_evaluate(series, eval_year=series.index[-1].year)
         model = get_best_arima_model(series)
         joblib.dump(model, model_filename)
-        save_to_gcs(bucket_name, model_filename, model_blob_path)
+        save_to_gcs(bucket_name, model_filename, blob_path)
         save_model_info_to_gcs({
             'accuracy': accuracy,
             'best_order': best_order,
             'best_seasonal_order': best_seasonal_order
-        }, bucket_name, model_info_blob_path)
+        }, bucket_name, model_info_filename)
         print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
 
     # Prédiction
@@ -337,6 +334,7 @@ def predict(entity_type):
         response['codes_postaux'] = entity.codes_postaux
 
     return jsonify(response)
+
 
 @app.route('/get_image', methods=['GET'])
 def get_image():
