@@ -2,40 +2,34 @@ import os
 from flask import Flask, jsonify, request, redirect
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
+import joblib
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
-from model import calculate_accuracy, plot_population_forecast, generate_monitoring_plot, get_best_arima_model, train_and_evaluate, save_model_info_to_gcs, load_model_info_from_gcs
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 
 from google.cloud import secretmanager, storage
-import joblib
+from model import download_from_gcs, plot_population_forecast, generate_monitoring_plot, get_best_arima_model, save_to_gcs, train_and_evaluate, save_model_info_to_gcs, load_model_info_from_gcs
 
 def get_secret(secret_id, project_id):
-    """Retrieve a secret from Google Cloud Secret Manager."""
     client = secretmanager.SecretManagerServiceClient()
     secret_name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
     response = client.access_secret_version(name=secret_name)
     secret_value = response.payload.data.decode('UTF-8')
     return secret_value
 
-# Exemple d'utilisation
-bucket_name = 'my-flask-app-bucket'  
+bucket_name = 'my-flask-app-bucket'
 project_id = "dev-ia-e1"
 db_url = get_secret('database-url', project_id)
 
-# Configuration de l'application Flask
 app = Flask(__name__)
-
-CORS(app)  
+CORS(app)
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Initialisation de SQLAlchemy avec Flask
 db = SQLAlchemy(app)
 
-# Définition des modèles
 class Commune(db.Model):
     __tablename__ = 'communes'
     code = Column(String(10), primary_key=True)
@@ -64,47 +58,24 @@ class PopulationParAnnee(db.Model):
     annee = Column(Integer, primary_key=True)
     population = Column(Integer)
 
-# Configuration des entités avec leurs attributs correspondants
 entity_config = {
     'commune': {'model': Commune, 'code_attr': 'code', 'population_relationship': 'populations', 'entity_code_relationship': Commune.code_departement},
     'departement': {'model': Departement, 'code_attr': 'code', 'population_relationship': 'communes', 'entity_code_relationship': Departement.code_region},
     'region': {'model': Region, 'code_attr': 'code', 'population_relationship': 'departements', 'entity_code_relationship': Region.code}
 }
 
-def save_to_gcs(bucket_name, source_file_name, destination_blob_name):
-    """Uploads a file to the bucket."""
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(destination_blob_name)
-
-    blob.upload_from_filename(source_file_name)
-    print(f"File {source_file_name} uploaded to {destination_blob_name}.")
-
-def download_from_gcs(bucket_name, source_blob_name, destination_file_name):
-    """Downloads a file from the bucket."""
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(source_blob_name)
-
-    blob.download_to_filename(destination_file_name)
-    print(f"File {source_blob_name} downloaded to {destination_file_name}.")
-    
 @app.route('/train/<entity_type>', methods=['GET'])
 def train(entity_type):
     code = request.args.get('code')
-
     if not code:
         return jsonify({'error': 'Veuillez fournir le paramètre "code".'}), 400
-
     config = entity_config.get(entity_type)
     if not config:
         return jsonify(message="Invalid entity type"), 400
-
     model = config['model']
     entity = db.session.query(model).filter(getattr(model, config['code_attr']) == code).first()
     if not entity:
         return jsonify({'error': f'{entity_type.capitalize()} avec code {code} non trouvé.'}), 404
-
     populations = []
     if entity_type == 'commune':
         populations = entity.populations
@@ -115,25 +86,19 @@ def train(entity_type):
         for departement in entity.departements:
             for commune in departement.communes:
                 populations.extend(commune.populations)
-
     if not populations:
         return jsonify({'error': f'Aucune donnée de population trouvée pour ce {entity_type}.'}), 404
-
     population_summary = {}
     for pop in populations:
         if pop.annee in population_summary:
             population_summary[pop.annee] += pop.population
         else:
             population_summary[pop.annee] = pop.population
-
     series = pd.Series(data=list(population_summary.values()), index=pd.to_datetime(list(population_summary.keys()), format='%Y')).asfreq('YS')
     series = series.interpolate(method='linear').dropna()
-
     eval_year = series.index[-1].year
-
     model_filename = f"{entity_type}_{code}_{eval_year}.pkl"
     model_info_filename = f"train_models/{entity_type}_{code}_{eval_year}_info.json"
-
     if os.path.exists(os.path.join('train_models', model_filename)) and os.path.exists(model_info_filename) and series.index[-1].year <= eval_year:
         model = joblib.load(f"train_models/{model_filename}")
         model_info = load_model_info_from_gcs(bucket_name, model_info_filename)
@@ -152,7 +117,6 @@ def train(entity_type):
             'best_seasonal_order': best_seasonal_order
         }, bucket_name, model_info_filename)
         print(f"Modèle sauvegardé sous {model_filename} avec les informations d'évaluation {model_info_filename}.")
-    
     response = {
         'code': code,
         'nom': entity.nom,
@@ -160,31 +124,24 @@ def train(entity_type):
         'best_order': best_order,
         'best_seasonal_order': best_seasonal_order
     }
-
     if entity_type == 'commune':
         response['codes_postaux'] = entity.codes_postaux
-
     return jsonify(response)
-        
+
 @app.route('/<entity_type>', methods=['GET'])
 def get_data(entity_type):
     code = request.args.get('code', default=None)
     year = request.args.get('year', default=None)
-
     config = entity_config.get(entity_type)
     if not config:
         return jsonify(message="Invalid entity type"), 400
-
     model = config['model']
     query = db.session.query(model)
-
     if code:
         query = query.filter(getattr(model, config['code_attr']) == code)
-
     entities = query.all()
     if not entities:
         return jsonify(message="No entities found"), 404
-
     for entity in entities:
         if entity_type == 'commune':
             populations = entity.populations if year is None else [pop for pop in entity.populations if pop.annee == year]
@@ -197,7 +154,6 @@ def get_data(entity_type):
                 for departement in entity.departements:
                     for commune in departement.communes:
                         populations.extend(commune.populations)
-                        
         population_summary = {}
         for pop in populations:
             if year and pop.annee != year:
@@ -206,54 +162,43 @@ def get_data(entity_type):
                 population_summary[pop.annee] += pop.population
             else:
                 population_summary[pop.annee] = pop.population
-
     response = {
         'code': entity.code,
         'nom': entity.nom,
         'populations': [{'annee': k, 'population': v} for k, v in sorted(population_summary.items())]
     }
-    
     if entity_type == 'commune':
         response['codes_postaux'] = entity.codes_postaux
-        
     return jsonify(response)
 
 @app.route('/form/<entity_type>', methods=['GET'])
 def get_entity(entity_type):
     config = entity_config.get(entity_type)
     code = request.args.get('code')
-    
     if not config:
         return jsonify(message="Invalid entity type"), 400
-
     model = config['model']
-    
     entitys = db.session.query(model).filter(config['entity_code_relationship'] == code).all() if code and model != Region else db.session.query(model).all()
     response = [{'code': entity.code, 'nom': entity.nom} for entity in entitys]
     return jsonify(response)
-    
+
 @app.route('/predict/<entity_type>', methods=['GET'])
 def predict(entity_type):
     code = request.args.get('code')
     target_year = request.args.get('year')
-
     if not code or not target_year:
         return jsonify({'error': 'Veuillez fournir les paramètres "code" et "target_year".'}), 400
-
     try:
         target_year = int(target_year)
     except ValueError:
         return jsonify({'error': 'L\'année cible doit être un entier.'}), 400
-
     config = entity_config.get(entity_type)
     if not config:
         return jsonify(message="Invalid entity type"), 400
-
     model = config['model']
     entity = db.session.query(model).filter(getattr(model, config['code_attr']) == code).first()
     if not entity:
         return jsonify({'error': f'{entity_type.capitalize()} avec code {code} non trouvé.'}), 404
-
     populations = []
     if entity_type == 'commune':
         populations = entity.populations
@@ -264,26 +209,19 @@ def predict(entity_type):
         for departement in entity.departements:
             for commune in departement.communes:
                 populations.extend(commune.populations)
-
     if not populations:
         return jsonify({'error': f'Aucune donnée de population trouvée pour ce {entity_type}.'}), 404
-
-    # Préparation des données sous forme de série temporelle
     population_summary = {}
     for pop in populations:
         if pop.annee in population_summary:
             population_summary[pop.annee] += pop.population
         else:
             population_summary[pop.annee] = pop.population
-
     series = pd.Series(data=list(population_summary.values()), index=pd.to_datetime(list(population_summary.keys()), format='%Y')).asfreq('YS')
-    series = series.interpolate(method='linear').dropna()  # Supprimer les NaN par interpolation linéaire
-
-    # Vérifier si le modèle existe déjà
+    series = series.interpolate(method='linear').dropna()
     model_filename = f"{entity_type}_{code}_{series.index[-1].year}.pkl"
     blob_path = f"models/{model_filename}"
     model_info_filename = f"train_models/{entity_type}_{code}_{series.index[-1].year}_info.json"
-
     bucket = storage.Client().bucket(bucket_name)
     if bucket.blob(blob_path).exists():
         download_from_gcs(bucket_name, blob_path, model_filename)
@@ -304,46 +242,34 @@ def predict(entity_type):
             'best_seasonal_order': best_seasonal_order
         }, bucket_name, model_info_filename)
         print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
-
-    # Prédiction
     forecast_df = model.predict(n_periods=target_year - series.index[-1].year)
     forecast_index = pd.date_range(start=pd.to_datetime(f"{series.index[-1].year + 1}-01-01"), periods=len(forecast_df), freq='YS')
     forecast_df = pd.DataFrame(forecast_df, index=forecast_index, columns=['mean'])
     predicted_value = forecast_df['mean'].iloc[-1]
-
-    # Sauvegarder le graphique
     plot_filename = f"plots/{entity_type}_{code}_{target_year}.png"
     plot_population_forecast(series, forecast_df, bucket_name, plot_filename)
     plot_monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{target_year}.png"
     generate_monitoring_plot(code, entity_type, [accuracy], bucket_name, plot_monitoring_filename)
-
     plot_url = f"https://storage.googleapis.com/{bucket_name}/{plot_filename}"
     monitoring_url = f"https://storage.googleapis.com/{bucket_name}/{plot_monitoring_filename}"
-
-    # Construction de la réponse
     response = {
         'code': entity.code,
         'nom': entity.nom,
         'target_year': target_year,
-        'accuracy' : accuracy,
+        'accuracy': accuracy,
         'predicted_population': int(predicted_value),
         'plot_url': plot_url,
         'monitoring_url': monitoring_url
     }
-
     if entity_type == 'commune':
         response['codes_postaux'] = entity.codes_postaux
-
     return jsonify(response)
-
 
 @app.route('/get_image', methods=['GET'])
 def get_image():
     filename = request.args.get('filename')
-
     if not filename:
         return jsonify({'error': 'Le fichier demandé n\'existe pas.'}), 404
-
     return redirect(filename)
 
 if __name__ == '__main__':
