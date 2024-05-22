@@ -22,7 +22,7 @@ steps:
       - flask-app
       - '--platform=managed'
       - '--image=europe-west1-docker.pkg.dev/dev-ia-e1/e2demographieia/flask-app:$COMMIT_SHA'
-      - '--labels=managed-by=gcp-cloud-build-deploy-cloud-run,commit-sha=$COMMIT_SHA,gcb-build-id=$BUILD_ID,gcb-trigger-id=$TRIGGER_ID'
+      - '--labels=managed-by=gcp-cloud-build-deploy-cloud-run,commit-sha=$COMMIT_SHA,gcb-build-id=$BUILD_ID'
       - '--region=europe-west1'
       - '--quiet'
     id: Deploy
@@ -38,7 +38,6 @@ substitutions:
   REPO_NAME: e2demographieia
   _DEPLOY_REGION: europe-west1
   _AR_HOSTNAME: europe-west1-docker.pkg.dev
-  _TRIGGER_ID: 1a093f1c-9075-4c75-83f3-fe97525beab9
 tags:
   - gcp-cloud-build-deploy-cloud-run
   - gcp-cloud-build-deploy-cloud-run-managed
