@@ -1,34 +1,50 @@
 import numpy as np
 import pandas as pd
 from pmdarima import auto_arima
-from statsmodels.tsa.statespace.sarimax import SARIMAX
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, mean_absolute_percentage_error
 import matplotlib.pyplot as plt
 from google.cloud import storage
 import joblib
 import io
 import json
 
+def save_to_gcs(bucket_name, source_file_name, destination_blob_name):
+    """Uploads a file to the bucket."""
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(destination_blob_name)
+
+    blob.upload_from_filename(source_file_name)
+    print(f"File {source_file_name} uploaded to {destination_blob_name}.")
+
+def download_from_gcs(bucket_name, source_blob_name, destination_file_name):
+    """Downloads a file from the bucket."""
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(source_blob_name)
+
+    blob.download_to_filename(destination_file_name)
+    print(f"File {source_blob_name} downloaded to {destination_file_name}.")
+
 def calculate_rmse(y_true, y_pred):
     """Calculates the Root Mean Squared Error (RMSE)."""
     return np.sqrt(mean_squared_error(y_true, y_pred))
 
-def train_and_evaluate(series, eval_year=None):
-    """Train the model and evaluate its performance."""
-    # Diviser les données en train et test
-    train, test = series[:str(eval_year)], series[str(eval_year):]
+def perform_cross_validation(series, n_splits=5):
+    """Performs cross-validation and returns the accuracy for each split."""
+    from sklearn.model_selection import TimeSeriesSplit
     
-    # Entraîner le modèle sur les données d'entraînement
-    model = get_best_arima_model(train)
-    
-    # Prédire les valeurs sur les données de test
-    y_pred = model.predict(n_periods=len(test))
-    
-    # Calculer l'RMSE
-    accuracy = calculate_rmse(test.values, y_pred)
-    
-    # Retourner l'accuracy et les paramètres du modèle
-    return accuracy, model.order, model.seasonal_order
+    tscv = TimeSeriesSplit(n_splits=n_splits)
+    accuracies = []
+
+    for train_index, test_index in tscv.split(series):
+        train, test = series.iloc[train_index], series.iloc[test_index]
+        model = get_best_arima_model(train)
+        y_pred = model.predict(n_periods=len(test))
+        accuracy = calculate_rmse(test.values, y_pred)
+        accuracies.append(accuracy)
+
+    return accuracies
 
 def get_best_arima_model(series):
     model = auto_arima(series, seasonal=False, trace=True, error_action='ignore', suppress_warnings=True, stepwise=True)
@@ -40,7 +56,7 @@ def get_best_arima_model(series):
 def calculate_accuracy(series, model):
     if len(series) == 0:
         return 0 
-    predictions = model.predict_in_sample()
+    predictions = model.predict(start=0, end=len(series)-1)
     actual = series.values
     if len(predictions) != len(actual):
         min_len = min(len(predictions), len(actual))
@@ -63,6 +79,18 @@ def plot_population_forecast(series, forecast_df, bucket_name, blob_name):
     
     save_plot_to_gcs(fig, bucket_name, blob_name)
 
+def generate_monitoring_plot(code, entity_type, accuracies, bucket_name, blob_name):
+    epochs = list(range(1, len(accuracies) + 1))
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(epochs, accuracies, marker='o', label='Accuracy')
+    ax.set_xlabel('Epochs')
+    ax.set_ylabel('Accuracy')
+    ax.set_title(f'Monitoring des Performances du Modèle pour {entity_type} {code}')
+    ax.legend()
+    ax.grid(True)
+    
+    save_plot_to_gcs(fig, bucket_name, blob_name)
+
 def save_plot_to_gcs(fig, bucket_name, blob_name):
     buf = io.BytesIO()
     fig.savefig(buf, format='png')
@@ -76,34 +104,3 @@ def save_plot_to_gcs(fig, bucket_name, blob_name):
     buf.close()
     plt.close(fig)
     print(f"File {blob_name} uploaded to {bucket_name}.")
-
-def generate_monitoring_plot(code, entity_type, accuracies, bucket_name, blob_name):
-    epochs = list(range(1, len(accuracies) + 1))
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(epochs, accuracies, marker='o', label='Accuracy')
-    ax.set_xlabel('Epochs')
-    ax.set_ylabel('Accuracy')
-    ax.set_title(f'Monitoring des Performances du Modèle pour {entity_type} {code}')
-    ax.legend()
-    ax.grid(True)
-    
-    save_plot_to_gcs(fig, bucket_name, blob_name)
-
-def save_model_info_to_gcs(model_info, bucket_name, blob_name):
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(blob_name)
-
-    model_info_json = json.dumps(model_info)
-    blob.upload_from_string(model_info_json, content_type='application/json')
-    print(f"Model info uploaded to {blob_name}.")
-
-def load_model_info_from_gcs(bucket_name, blob_name):
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(blob_name)
-
-    model_info_json = blob.download_as_string()
-    model_info = json.loads(model_info_json)
-    print(f"Model info loaded from {blob_name}.")
-    return model_info
