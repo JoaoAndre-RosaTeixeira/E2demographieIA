@@ -306,8 +306,12 @@ def predict(entity_type):
         print(f"Entraînement et sauvegarde du nouveau modèle pour {entity_type} avec code {code}.")
 
     # Prédiction
-    forecast_df = model.predict(n_periods=target_year - series.index[-1].year)
-    forecast_index = pd.date_range(start=pd.to_datetime(f"{series.index[-1].year + 1}-01-01"), periods=len(forecast_df), freq='YS')
+    n_periods = target_year - series.index[-1].year
+    if n_periods <= 0:
+        return jsonify({'error': 'L\'année cible doit être supérieure à l\'année des données les plus récentes.'}), 400
+
+    forecast_df = model.predict(n_periods=n_periods)
+    forecast_index = pd.date_range(start=series.index[-1] + pd.DateOffset(years=1), periods=n_periods, freq='YS')
     forecast_df = pd.DataFrame(forecast_df, index=forecast_index, columns=['mean'])
     predicted_value = forecast_df['mean'].iloc[-1]
 
@@ -335,6 +339,7 @@ def predict(entity_type):
         response['codes_postaux'] = entity.codes_postaux
 
     return jsonify(response)
+
 
 
 @app.route('/get_image', methods=['GET'])
