@@ -125,6 +125,7 @@ def get_data(entity_type):
             response['codes_postaux'] = entity.codes_postaux
 
         all_responses.append(response)
+        
 
     return jsonify(all_responses)
 
