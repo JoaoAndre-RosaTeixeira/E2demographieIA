@@ -1,36 +1,36 @@
-import psycopg2
-import urllib.parse as up
-from google.cloud import secretmanager, storage
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+# Charger les données
+data = pd.read_csv('path_to_your_dataset.csv')
 
-def get_secret(secret_id, project_id):
-    """Retrieve a secret from Google Cloud Secret Manager."""
-    client = secretmanager.SecretManagerServiceClient()
-    secret_name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
-    response = client.access_secret_version(name=secret_name)
-    secret_value = response.payload.data.decode('UTF-8')
-    return secret_value
+# Séparer les caractéristiques et la cible
+X = data[['feature1', 'feature2', 'feature3']]
+y = data['target']
 
-def test_db_connection(db_url):
-    try:
-        # Reformater l'URL pour psycopg2
-        up.uses_netloc.append("postgres")
-        url = up.urlparse(db_url)
-        
-        conn = psycopg2.connect(
-            database=url.path[1:],
-            user=url.username,
-            password=url.password,
-            host=url.hostname,
-            port=url.port
-        )
-        print("Connection successful")
-        conn.close()
-    except Exception as e:
-        print(f"Connection failed: {e}")
+# Diviser en ensembles d'entraînement et de test
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
 
-# Exemple d'utilisation
-project_id = "dev-ia-e1"
-db_url = get_secret('database-url', project_id)
-print(f"Database URL: {db_url}")  # Imprimez l'URL pour vérifier son format
-test_db_connection(db_url)
+# Modèles
+models = {
+    'Linear Regression': LinearRegression(),
+    'KNN': KNeighborsRegressor(),
+    'Decision Tree': DecisionTreeRegressor(),
+    'Random Forest': RandomForestRegressor()
+}
+
+for name, model in models.items():
+    model.fit(X_train, y_train)
+    predictions = model.predict(X_test)
+    print(f"{name} Performance:")
+    print(f"MAE: {mean_absolute_error(y_test, predictions)}")
+    print(f"MAPE: {np.mean(np.abs((y_test - predictions) / y_test)) * 100}")
+    print(f"MSE: {mean_squared_error(y_test, predictions)}")
+    print(f"RMSE: {mean_squared_error(y_test, predictions, squared=False)}")
+    print(f"R-squared: {r2_score(y_test, predictions)}\n")

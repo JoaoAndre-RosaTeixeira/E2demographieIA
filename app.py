@@ -91,6 +91,8 @@ def get_data(entity_type):
     if not entities:
         return jsonify(message="No entities found"), 404
 
+    all_responses = []
+
     for entity in entities:
         if entity_type == 'commune':
             populations = entity.populations if year is None else [pop for pop in entity.populations if pop.annee == year]
@@ -113,16 +115,18 @@ def get_data(entity_type):
             else:
                 population_summary[pop.annee] = pop.population
 
-    response = {
-        'code': entity.code,
-        'nom': entity.nom,
-        'populations': [{'annee': k, 'population': v} for k, v in sorted(population_summary.items())]
-    }
-    
-    if entity_type == 'commune':
-        response['codes_postaux'] = entity.codes_postaux
-        
-    return jsonify(response)
+        response = {
+            'code': entity.code,
+            'nom': entity.nom,
+            'populations': [{'annee': k, 'population': v} for k, v in sorted(population_summary.items())]
+        }
+
+        if entity_type == 'commune':
+            response['codes_postaux'] = entity.codes_postaux
+
+        all_responses.append(response)
+
+    return jsonify(all_responses)
 
 @app.route('/form/<entity_type>', methods=['GET'])
 def get_entity(entity_type):
