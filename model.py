@@ -30,7 +30,7 @@ def calculate_rmse(y_true, y_pred):
     """Calculates the Root Mean Squared Error (RMSE)."""
     return np.sqrt(mean_squared_error(y_true, y_pred))
 
-def perform_cross_validation(series, n_splits=5):
+def perform_cross_validation(series, n_splits=10):
     """Performs cross-validation and returns the accuracy for each split."""
     from sklearn.model_selection import TimeSeriesSplit
     
@@ -83,7 +83,7 @@ def generate_monitoring_plot(code, entity_type, accuracies, bucket_name, blob_na
     epochs = list(range(1, len(accuracies) + 1))
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(epochs, accuracies, marker='o', label='Accuracy')
-    ax.set_xlabel('Epochs')
+    ax.set_xlabel('Splits')
     ax.set_ylabel('Accuracy')
     ax.set_title(f'Monitoring des Performances du Modèle pour {entity_type} {code}')
     ax.legend()
