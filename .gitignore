@@ -5,3 +5,9 @@ models/
 train_models/
 *.pkl
 plots/
+test*.py
+*.h5
+*.keras
+my_dir/
+*.csv
+*.joblib
