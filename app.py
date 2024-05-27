@@ -4,7 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
-from model import download_from_gcs, perform_cross_validation, plot_population_forecast, generate_monitoring_plot, get_best_arima_model, remove_outliers, save_to_gcs 
+from model import download_from_gcs, perform_cross_validation, plot_population_forecast, generate_monitoring_plot, get_best_arima_model, save_to_gcs 
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
@@ -190,9 +190,6 @@ def predict(entity_type):
     series = pd.Series(data=list(population_summary.values()), index=pd.to_datetime(list(population_summary.keys()), format='%Y')).asfreq('YS')
     series = series.interpolate(method='linear').dropna()  # Supprimer les NaN par interpolation linéaire
 
-    # Traitement des valeurs aberrantes et augmentation des données
-    series = remove_outliers(series)
-
     # Vérifier si le modèle existe déjà
     model_filename = f"{entity_type}_{code}_{target_year}.pkl"
     blob_path = f"models/{model_filename}"
@@ -232,7 +229,7 @@ def predict(entity_type):
         'code': entity.code,
         'nom': entity.nom,
         'target_year': target_year,
-        'accuracy': cross_val_accuracy[-1] if cross_val_accuracy else None,
+        'accuracy' : cross_val_accuracy[-1] if cross_val_accuracy else None,
         'predicted_population': int(predicted_value),
         'plot_url': plot_url,
         'monitoring_url': monitoring_url
