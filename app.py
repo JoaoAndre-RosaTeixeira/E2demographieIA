@@ -244,10 +244,6 @@ def predict(entity_type):
 
     return jsonify(response)
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
-
-
 
 @app.route('/get_image', methods=['GET'])
 def get_image():
