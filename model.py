@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 from google.cloud import storage
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
 from scipy import stats
-from imblearn.over_sampling import SMOTE
 from keras.models import Sequential
 from keras.layers import Dense
 import io
@@ -30,11 +29,6 @@ def remove_outliers(series):
     z_scores = np.abs(stats.zscore(series))
     return series[z_scores < 3]
 
-# Fonction pour augmenter les données avec SMOTE
-def augment_data_with_smote(series):
-    smote = SMOTE()
-    series_resampled, _ = smote.fit_resample(series.values.reshape(-1, 1), [0]*len(series))
-    return pd.Series(series_resampled.flatten())
 
 # Fonction pour créer et entraîner un modèle de réseau de neurones
 def train_neural_network(series):

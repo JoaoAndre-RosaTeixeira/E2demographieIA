@@ -192,7 +192,6 @@ def predict(entity_type):
 
     # Traitement des valeurs aberrantes et augmentation des données
     series = remove_outliers(series)
-    series = augment_data_with_smote(series)
 
     # Vérifier si le modèle existe déjà
     model_filename = f"{entity_type}_{code}_{target_year}.pkl"
