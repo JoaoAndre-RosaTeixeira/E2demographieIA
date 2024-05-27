@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from pmdarima import auto_arima
-from sklearn.metrics import mean_squared_error, f1_score
+from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
 from google.cloud import storage
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
@@ -66,6 +66,21 @@ def generate_monitoring_plot(code, entity_type, accuracies, bucket_name, blob_na
     ax.legend()
     ax.grid(True)
     save_plot_to_gcs(fig, bucket_name, blob_name)
+    
+def plot_population_forecast(series, forecast_df, bucket_name, blob_name):
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(series, label='Historical Population')
+    ax.plot(forecast_df['mean'], label='Forecasted Population')
+    if 'mean_ci_lower' in forecast_df.columns and 'mean_ci_upper' in forecast_df.columns:
+        ax.fill_between(forecast_df.index, forecast_df['mean_ci_lower'], forecast_df['mean_ci_upper'], color='pink', alpha=0.3)
+    ax.set_xlabel('Year')
+    ax.set_ylabel('Population')
+    ax.set_title('Population Forecast')
+    ax.legend()
+    ax.grid(True)
+    
+    save_plot_to_gcs(fig, bucket_name, blob_name)
+
 
 # Fonction pour sauvegarder les plots sur GCS
 def save_plot_to_gcs(fig, bucket_name, blob_name):
@@ -79,3 +94,37 @@ def save_plot_to_gcs(fig, bucket_name, blob_name):
     buf.close()
     plt.close(fig)
     print(f"File {blob_name} uploaded to {bucket_name}.")
+    
+def save_plot_to_gcs(fig, bucket_name, blob_name):
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png')
+    buf.seek(0)
+    
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    blob.upload_from_file(buf, content_type='image/png')
+    
+    buf.close()
+    plt.close(fig)
+    print(f"File {blob_name} uploaded to {bucket_name}.")
+
+def save_to_gcs(bucket_name, source_file_name, destination_blob_name):
+    """Uploads a file to the bucket."""
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(destination_blob_name)
+
+    blob.upload_from_filename(source_file_name)
+    print(f"File {source_file_name} uploaded to {destination_blob_name}.")
+
+def download_from_gcs(bucket_name, source_blob_name, destination_file_name):
+    """Downloads a file from the bucket."""
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(source_blob_name)
+
+    blob.download_to_filename(destination_file_name)
+    print(f"File {source_blob_name} downloaded to {destination_file_name}.")
+
+
