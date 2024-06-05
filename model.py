@@ -92,31 +92,42 @@ def generate_monitoring_plot(code, entity_type, cross_val_results, bucket_name, 
     maes = [result['metrics']['mae'] for result in cross_val_results]
     r2s = [result['metrics']['r2'] for result in cross_val_results]
 
-    fig, ax1 = plt.subplots(figsize=(10, 5))
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 15), sharex=True)
     
-    ax1.set_xlabel('Splits')
-    ax1.set_ylabel('Metrics')
+    # Plot des métriques
     ax1.plot(epochs, rmses, marker='o', label='RMSE')
     ax1.plot(epochs, maes, marker='o', label='MAE')
     ax1.plot(epochs, r2s, marker='o', label='R²')
+    ax1.set_ylabel('Metrics')
     ax1.legend(loc='upper left')
     ax1.grid(True)
+    ax1.set_title('Métriques de Performance')
 
-    ax2 = ax1.twinx()
+    # Plot des valeurs réelles
     ax2.set_ylabel('Population')
-    
     for result in cross_val_results:
         train_values = result['train_values']
         test_values = result['test_values']
-        predicted_values = result['predicted_values']
         ax2.plot(range(len(train_values), len(train_values) + len(test_values)), test_values, 'b-', alpha=0.6)
-        ax2.plot(range(len(train_values), len(train_values) + len(predicted_values)), predicted_values, 'r-', alpha=0.6)
-    
-    ax2.legend(['Real Population', 'Predicted Population'], loc='upper right')
-    
-    ax1.set_title(f'Monitoring des Performances du Modèle pour {entity_type} {code}')
+    ax2.legend(['Real Population'], loc='upper right')
+    ax2.grid(True)
+    ax2.set_title('Valeurs Réelles de la Population')
+
+    # Plot des valeurs prédites
+    ax3.set_xlabel('Splits')
+    ax3.set_ylabel('Population')
+    for result in cross_val_results:
+        train_values = result['train_values']
+        predicted_values = result['predicted_values']
+        ax3.plot(range(len(train_values), len(train_values) + len(predicted_values)), predicted_values, 'r-', alpha=0.6)
+    ax3.legend(['Predicted Population'], loc='upper right')
+    ax3.grid(True)
+    ax3.set_title('Valeurs Prédites de la Population')
+
+    plt.suptitle(f'Monitoring des Performances du Modèle pour {entity_type} {code}')
 
     save_plot_to_gcs(fig, bucket_name, blob_name)
+
 
 def save_plot_to_gcs(fig, bucket_name, blob_name):
     buf = io.BytesIO()
