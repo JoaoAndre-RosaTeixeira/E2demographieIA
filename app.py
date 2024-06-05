@@ -20,15 +20,14 @@ def get_secret(secret_id, project_id):
     secret_value = response.payload.data.decode('UTF-8')
     return secret_value
 
-# Exemple d'utilisation
-bucket_name = 'my-flask-app-bucket'  
-project_id = "dev-ia-e1"
-db_url = get_secret('database-url', project_id)
-
 # Configuration de l'application Flask
 app = Flask(__name__)
 
-CORS(app)  
+CORS(app)
+project_id = "dev-ia-e1"
+bucket_name = 'my-flask-app-bucket'
+db_url = get_secret('database-url', project_id)
+
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -71,7 +70,6 @@ entity_config = {
     'region': {'model': Region, 'code_attr': 'code', 'population_relationship': 'departements', 'entity_code_relationship': Region.code}
 }
 
-        
 @app.route('/<entity_type>', methods=['GET'])
 def get_data(entity_type):
     code = request.args.get('code', default=None)
@@ -126,7 +124,6 @@ def get_data(entity_type):
 
         all_responses.append(response)
         
-
     return jsonify(all_responses)
 
 @app.route('/form/<entity_type>', methods=['GET'])
@@ -142,7 +139,7 @@ def get_entity(entity_type):
     entitys = db.session.query(model).filter(config['entity_code_relationship'] == code).all() if code and model != Region else db.session.query(model).all()
     response = [{'code': entity.code, 'nom': entity.nom} for entity in entitys]
     return jsonify(response)
-    
+
 @app.route('/predict/<entity_type>', methods=['GET'])
 def predict(entity_type):
     code = request.args.get('code')
@@ -213,13 +210,14 @@ def predict(entity_type):
     predicted_value = forecast_df['mean'].iloc[-1]
 
     # Calcul de l'accuracy avec validation croisée
-    cross_val_accuracy = perform_cross_validation(series)
+    cross_val_results = perform_cross_validation(series)
+    cross_val_accuracy = [result['metrics'] for result in cross_val_results]
 
     # Sauvegarder le graphique
     plot_filename = f"plots/{entity_type}_{code}_{target_year}.png"
     plot_population_forecast(series, forecast_df, bucket_name, plot_filename)
     plot_monitoring_filename = f"plots/monitoring_{entity_type}_{code}_{target_year}.png"
-    generate_monitoring_plot(code, entity_type, cross_val_accuracy, bucket_name, plot_monitoring_filename)
+    generate_monitoring_plot(code, entity_type, cross_val_results, bucket_name, plot_monitoring_filename)
 
     plot_url = f"https://storage.googleapis.com/{bucket_name}/{plot_filename}"
     monitoring_url = f"https://storage.googleapis.com/{bucket_name}/{plot_monitoring_filename}"
@@ -229,7 +227,7 @@ def predict(entity_type):
         'code': entity.code,
         'nom': entity.nom,
         'target_year': target_year,
-        'accuracy': cross_val_accuracy[-1] if cross_val_accuracy else None,
+        'accuracy': cross_val_accuracy,
         'predicted_population': int(predicted_value),
         'plot_url': plot_url,
         'monitoring_url': monitoring_url

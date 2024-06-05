@@ -52,11 +52,11 @@ def perform_cross_validation(series, n_splits=10):
         metrics = calculate_metrics(test.values, y_pred)
         
         split_result = {
-            "train_index": train_index,
-            "test_index": test_index,
-            "train_values": train.values,
-            "test_values": test.values,
-            "predicted_values": y_pred,
+            "train_index": train_index.tolist(),
+            "test_index": test_index.tolist(),
+            "train_values": train.tolist(),
+            "test_values": test.tolist(),
+            "predicted_values": y_pred.tolist(),
             "metrics": metrics,
             "model_order": model.order,
             "model_seasonal_order": model.seasonal_order
