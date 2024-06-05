@@ -229,7 +229,7 @@ def predict(entity_type):
         'code': entity.code,
         'nom': entity.nom,
         'target_year': target_year,
-        'accuracy' : cross_val_accuracy[-1] if cross_val_accuracy else None,
+        'accuracy': cross_val_accuracy[-1] if cross_val_accuracy else None,
         'predicted_population': int(predicted_value),
         'plot_url': plot_url,
         'monitoring_url': monitoring_url
@@ -239,7 +239,6 @@ def predict(entity_type):
         response['codes_postaux'] = entity.codes_postaux
 
     return jsonify(response)
-
 
 @app.route('/get_image', methods=['GET'])
 def get_image():
