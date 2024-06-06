@@ -26,10 +26,10 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # - name: Run tests
-    #   env:
-    #     PYTHONPATH: ${{ github.workspace }}
-    #   run: pytest tests
+    - name: Run tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+      run: pytest tests
 
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v1
