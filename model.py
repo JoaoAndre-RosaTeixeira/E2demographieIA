@@ -128,7 +128,6 @@ def generate_monitoring_plot(code, entity_type, cross_val_results, bucket_name, 
 
     save_plot_to_gcs(fig, bucket_name, blob_name)
 
-
 def save_plot_to_gcs(fig, bucket_name, blob_name):
     buf = io.BytesIO()
     fig.savefig(buf, format='png')
